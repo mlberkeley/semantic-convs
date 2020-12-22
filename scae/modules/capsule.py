@@ -6,7 +6,7 @@ from util import math as math
 import torch.nn.functional as F
 import torch.distributions as D
 import collections
-
+from collections import OrderedDict
 
 class CapsuleLayer(nn.Module):
     _n_transform_params = 6
@@ -45,22 +45,33 @@ class CapsuleLayer(nn.Module):
       self.build()
       
     def build(self):
-        self.mlp = nn.ModuleList()
-        shape_list = [16, self._n_hiddens, self._n_caps_params]
-        for i in range(1, len(shape_list)):
-            self.mlp.append(nn.Linear(shape_list[i-1], shape_list[i]))
-            self.mlp.append(nn.ReLU())
+        #self.mlp = []
+        #shape_list = [16, self._n_hiddens, self._n_caps_params]
+        #for i in range(1, len(shape_list)):
+        #    self.mlp.append(nn.Linear(shape_list[i-1], shape_list[i]))
+        #    self.mlp.append(nn.ReLU())
+        #self.mlp = nn.Sequential(self.mlp)
         
-        self.caps_mlp = nn.ModuleList()
-        shape_list = [32, self._n_hiddens, self.n_outputs]
-        for i in range(1, len(shape_list)):
-            self.caps_mlp.append(nn.Linear(shape_list[i-1],
-                                           shape_list[i], bias = False))
-            self.caps_mlp.append(nn.ReLU())
+        self.mlp = nn.Sequential(nn.Linear(16, self._n_hiddens), nn.ReLU(),
+                                 nn.Linear(self._n_hiddens, self._n_caps_params),
+                                 nn.ReLU())
+        self.caps_mlp = nn.Sequential(nn.Linear(32, self._n_hiddens), nn.ReLU(),
+                                 nn.Linear(self._n_hiddens, self.n_outputs),
+                                 nn.ReLU())
         
+        #self.caps_mlp = []
+        #shape_list = [32, self._n_hiddens, self.n_outputs]
+        #for i in range(1, len(shape_list)):
+        #    self.caps_mlp.append(nn.Linear(shape_list[i-1],
+        #                                   shape_list[i], bias = False))
+        #    self.caps_mlp.append(nn.ReLU())
+        #self.caps_mlp = nn.Sequential(self.caps_mlp)
         
     def forward(self, x, parent_transform=None, parent_presence=None):
         batch_size = x.shape[0]
+        
+        print(x.shape, "eihbvf")
+        
         batch_shape = [batch_size, self._n_caps]
         if self._n_caps_params is not None:
             raw_caps_params = self.mlp(x)
@@ -77,7 +88,7 @@ class CapsuleLayer(nn.Module):
                                         dtype=torch.float32)
             caps_exist = pmf.sample(batch_shape + [1])
         
-        caps_params = torch.cat([caps_params, caps_exist], -1)
+        # caps_params = torch.cat([caps_params, caps_exist], -1)
         all_params = self.caps_mlp(caps_params)
         all_params = torch.split(all_params, self.splits, -1)
         res = [torch.reshape(i, batch_shape + s)
@@ -85,12 +96,13 @@ class CapsuleLayer(nn.Module):
         cpr_dynamic = res[0]
         
         # res = [snt.AddBias()(i) for i in res[1:]]
-        ccr, pres_logit_per_caps, pres_logit_per_vote, scale_per_vote = res
+        print(len(res))
+        ccr, pres_logit_per_caps, pres_logit_per_vote, scale_per_vote, _ = res
         
         if self._caps_dropout_rate != 0.0:
             pres_logit_per_caps += math.safe_log(caps_exist)
         
-        cpr_static = torch.Tensor(size=[1, self._n_caps, self._n_votes,
+        cpr_static = torch.empty(size=[1, self._n_caps, self._n_votes,
                                         self._n_transform_params],
                                   requires_grad=True)
         
@@ -105,7 +117,8 @@ class CapsuleLayer(nn.Module):
             cpr_dynamic = torch.zeros_like(cpr_dynamic)
         
         cpr = math.geometric_transform(cpr_dynamic + cpr_static)
-        ccr_per_vote = ccr.tile((2, self._n_votes))
+        print(ccr.shape, "BEJBCWS")
+        ccr_per_vote = ccr.repeat((2, self._n_votes))
         votes = torch.matmul(ccr_per_vote, cpr)
         
         if parent_presence is not None:

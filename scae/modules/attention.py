@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 class SetTransformer(nn.Module):
 
@@ -32,7 +32,7 @@ class SetTransformer(nn.Module):
 
         # generic linear mlp applied over whole batch
         print("$$$$$$$$", x.shape)
-        h = nn.Linear(self._n_dim, self._n_dim)(x)
+        h = nn.Linear(23, self._n_dim)(x)
 
         args = [self._n_heads, self._layer_norm, self._dropout_rate]
         klass = SelfAttention
@@ -45,7 +45,7 @@ class SetTransformer(nn.Module):
         # From Paper: Encoder(X) := SAB(SAB(X)) : SAB = Self-Attention Block
         for _ in range(self._n_layers):
             h = klass(*args)(h, presence)
-        z = nn.Linear(self._n_output_dims, self._n_output_dims)(h)
+        z = nn.Linear(16, 16)(h)
 
         # From Paper: Decoder(Z) = rFF(SAB(PMA_k(Z)))
         # s.t. rFF is a row-wise (sample independent) Feed-Forward Layer
@@ -83,13 +83,14 @@ class QKVAttention(nn.Module):
         n_dim = int(queries.shape[-1])
 
         # [B, M, d] x [B, d, N] = [B, M, N]
-        routing = torch.matmul(queries, keys.t())
+        print("DJDN", queries.shape, keys.transpose(1, 2).shape)
+        routing = torch.matmul(queries, keys.transpose(1, 2))
 
         if presence is not None:
             presence = torch.unsqueeze(presence, -2).float()
             routing -= (1. - presence) * 1e32
 
-        routing = nn.Softmax(routing / np.sqrt(n_dim), -1)
+        routing = F.softmax(routing / np.sqrt(n_dim), -1)
 
         # every output is a linear combination of all inputs
         # [B, M, N] x [B, N, d_v] = [B, M, d_v]
@@ -114,7 +115,7 @@ class MultiHeadQKVAttention(nn.Module):
 
         def transform(x, n=self._n_heads):
             n_dim = np.ceil(float(int(x.shape[-1])) / n)
-            return nn.Linear(int(n_dim))(x)
+            return nn.Linear(int(n_dim), int(n_dim))(x)
 
         outputs = []
         for _ in range(self._n_heads):
@@ -123,7 +124,7 @@ class MultiHeadQKVAttention(nn.Module):
                 args.append(presence)
             outputs.append(QKVAttention()(*args))
 
-        linear = nn.Linear(values.shape[-1])
+        linear = nn.Linear(values.shape[-1], values.shape[-1])
         return linear(torch.cat((outputs), dim=-1))
 
 
@@ -159,8 +160,9 @@ class SelfAttention(nn.Module):
             y = nn.LayerNorm(y[1:])(y)
 
         # Two layers of row-wise (independent) feed-forward
-        h = nn.Linear(n_dims, n_dims)(nn.Linear(2*n_dims, n_dims)(x))
-
+        h = nn.Linear(n_dims, 2*n_dims)(x)
+        h = nn.Linear(2*n_dims, n_dims)(h)
+        
         if self._dropout_rate > 0.:
             h = nn.Dropout(self._dropout_rate)(h)
 

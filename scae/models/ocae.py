@@ -50,7 +50,13 @@ class OCAE(pl.LightningModule):
         input_pose = torch.cat([pose, 1. - expanded_pres], -1)
         input_pose = torch.cat([input_pose, primary_caps.features], -1)
         n_templates = int(primary_caps.poses.shape[1])
-        templates = self.p_decoder(n_templates, primary_caps.features)
+        # templates = self.p_decoder(n_templates, primary_caps.features)
+        print(input_pose.shape)
+        h = self.encoder(input_pose, pres)
+        print(type(h), "GEEEEEEEEE")
+        target_pose, target_pres = pose, pres
+        res = self.decoder(h, target_pose, target_pres)
+        
         """
         img, labels = batch
         batch_size = img.shape[0]

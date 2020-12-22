@@ -18,7 +18,7 @@ def safe_log(tensor, eps=1e-16):
                          torch.log(tensor))
     return tensor
 
-def add_noise(tensor, noise_type, scale):
+def add_noise(tensor, noise_type="uniform", scale=1):
     if noise_type == 'uniform':
         noise = (torch.rand(tensor.shape) - 0.5) * scale
     elif noise_type == 'logistic':
@@ -81,7 +81,7 @@ def geometric_transform(pose_tensors, similarity=False, nonlinear=True, as_3x3=F
     # Convert poses to 3x3 A matrix so: [y, 1] = A [x, 1]
     if as_3x3 or inverse:
         poses = poses.reshape(*poses.shape[:-1], 2, 3)
-        bottom_pad = torch.zeros(*poses.shape[:-2], 1, 3).cuda()
+        bottom_pad = torch.zeros(*poses.shape[:-2], 1, 3)
         bottom_pad[..., 2] = 1
         # shape (... , 2, 3) + shape (... , 1, 3) = shape (... , 3, 3)
         poses = torch.cat([poses, bottom_pad], dim=-2)

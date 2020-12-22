@@ -163,7 +163,7 @@ def main():
         
         encoder = SetTransformer(n_layers=3, n_heads=1, n_dims=16,
                                  n_output_dims=256, n_outputs=10)
-        decoder = ImageCapsule(n_caps=10, n_caps_dims=2, n_votes=16,
+        decoder = ImageCapsule(n_caps=16, n_caps_dims=2, n_votes=16,
                                n_caps_params=32, n_hiddens=128, 
                                learn_vote_scale=True, deformations=True,
                                noise_type='uniform', noise_scale=4.,
@@ -174,12 +174,8 @@ def main():
         raise NotImplementedError()
 
     # Execute Experiment
-<<<<<<< HEAD
-    trainer = pl.Trainer(gpus=0, max_epochs=args.num_epochs, logger=logger)
-=======
     lr_logger = cb.LearningRateMonitor(logging_interval='step')
-    trainer = pl.Trainer(gpus=1, max_epochs=args.num_epochs, logger=logger, callbacks=[lr_logger])
->>>>>>> 2b2f451872ea98a0cfe2514f41e3b14858b964a8
+    trainer = pl.Trainer(gpus=0, max_epochs=args.num_epochs, logger=logger, callbacks=[lr_logger])
     trainer.fit(model, train_dataloader)
 
 if __name__ == "__main__":
