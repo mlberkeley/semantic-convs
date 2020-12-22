@@ -45,7 +45,8 @@ class CapsuleImageEncoder(nn.Module):
                caps_dim=6,
                feat_dim=16,
                noise_scale=4.,
-               similarity_transform=False):
+               similarity_transform=False,
+               input_channels=1):
         super(CapsuleImageEncoder, self).__init__()
         self._n_caps = n_caps
         self._caps_dim = caps_dim
@@ -54,7 +55,7 @@ class CapsuleImageEncoder(nn.Module):
         self._similarity_transform = similarity_transform
 
         # Image embedding encoder
-        channels = [1, 128, 128, 128, 128]
+        channels = [input_channels, 128, 128, 128, 128]
         strides = [2, 2, 1, 1]
         layers = []
         for i in range(4):
@@ -157,6 +158,7 @@ class TemplateImageDecoder(nn.Module):
             ts = torch.cat([ts, alphas], dim=1)
         else:
             self.temperature_logit = torch.nn.Parameter(torch.tensor([0.]), requires_grad=True)
+
         self.templates = torch.nn.Parameter(self._template_nonlin(ts * 2), requires_grad=True)
 
     def forward(self, poses, presences=None):
@@ -190,16 +192,16 @@ class TemplateImageDecoder(nn.Module):
         if self._use_alpha_channel:
             tt_rgb, tt_a = transformed_templates.split((self._n_channels, 1), dim=2)
             # template_logits    shape (batch_size, self._n_caps, self._output_size)
-            tt_logits = tt_a + torch.log(presence_probs)  # TODO: make log safe
+            tt_logits = tt_a + math_utils.safe_log(presence_probs)
             bg_logits = self.bg_logit
         else:
             tt_rgb = transformed_templates
 
             temperature = F.softplus(self.temperature_logit + .5) + 1e-4
-            tt_logits = tt_rgb / temperature + torch.log(presence_probs)  # TODO: make log safe
+            tt_logits = tt_rgb / temperature + math_utils.safe_log(presence_probs)
             bg_logits = bg_image / temperature
 
-        bg_logits = bg_logits.expand(batch_size, 1, 1, *self._output_size)
+        bg_logits = bg_logits.expand(batch_size, 1, self._n_channels, *self._output_size)
         # TODO: add template colorization from features
 
         # mixture_logits shape (batch_size, self._n_caps + 1, self._n_channels, self._output_size)

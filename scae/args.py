@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument(
         '--dataset',
         type=str.lower, default='mnist',
-        choices=['mnist'])
+        choices=['mnist', 'usps', 'cifar10', 'svhn'])
     parser.add_argument(
         '--data-workers',
         # default = len(os.sched_getaffinity(0))
@@ -74,12 +74,38 @@ def parse_args():
         help='learning rate decay')
     pcae_args.add_argument(
         '--pcae-weight-decay',
-        type=float, default=.01,
+        type=float, default=0.0,
         help='weight decay')
+    pcae_args.add_argument(
+        '--pcae-decoder-lr-coeff',
+        type=float, default=50.0,
+        help='decoder learning rate coefficient')
+    pcae_args.add_argument(
+        '--pcae-optimizer',
+        type=str.lower, default='sgd',
+        choices=['sgd', 'radam'],
+        help='optimizer algorithm')
+    pcae_args.add_argument(
+        '--pcae-lr-scheduler',
+        type=str.lower, default='exp',
+        choices=['exp', 'cosrestarts'],
+        help='learning rate scheduler')
+    pcae_args.add_argument(
+        '--pcae-loss-ll-coeff',
+        type=float, default=1.0,
+        help='log-likelihood loss contribution coefficient')
+    pcae_args.add_argument(
+        '--pcae-loss-temp-l1-coeff',
+        type=float, default=0.01,
+        help='template L1 norm loss contribution coefficient')
+    pcae_args.add_argument(
+        '--pcae-loss-mse-coeff',
+        type=float, default=0.0,
+        help='reconstruction MSE loss contribution coefficient')
     pcae_args.add_argument(
         '--alpha-channel',
         action='store_true', default=False,
-        help='expect input images to have an alpha channel')
+        help='whether to add an alpha channel to the part templates')
 
 
     ocae_args = parser.add_argument_group('OCAE Parameters')
@@ -101,11 +127,15 @@ def parse_args():
     logger_args.add_argument(
         '--log-run-name',
         type=str, default=None,
-        help='run name')
+        help='W&B run name')
     logger_args.add_argument(
         '--log-project',
         type=str, default='SCAE',
-        help='project name')
+        help='W&B project name')
+    logger_args.add_argument(
+        '--log-team',
+        type=str, default=None,
+        help='W&B team name')
     logger_args.add_argument(
         '--log-upload',
         action='store_true', default=False,

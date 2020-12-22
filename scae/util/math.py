@@ -10,11 +10,11 @@ def normalize(tensor, axis):
 
 def safe_ce(labels, probs, axis=-1):
     return torch.mean(-torch.sum(labels*safe_log(probs), dim=axis))
-    
+
 def safe_log(tensor, eps=1e-16):
-    is_zero = ~tensor.eq(torch.zeros(tensor.shape))
-    tensor = torch.where(is_zero, torch.ones_like(tensor), tensor)
-    tensor = torch.where(is_zero, torch.zeros_like(tensor) - 1e8,
+    is_zero = tensor.le(eps)
+    tensor = torch.where(is_zero, torch.ones_like(tensor).to('cuda'), tensor)
+    tensor = torch.where(is_zero, torch.zeros_like(tensor).to('cuda') - 1e8,
                          torch.log(tensor))
     return tensor
 
@@ -35,7 +35,7 @@ def add_noise(tensor, noise_type, scale):
     return tensor + noise
 
 
-def geometric_transform(pose_tensors, similarity=False, nonlinear=True, as_3x3=False):
+def geometric_transform(pose_tensors, similarity=False, nonlinear=True, as_3x3=False, inverse=True):
     """
     Converts parameter tensor into an affine or similarity transform.
     :param pose_tensor: [..., 6] tensor.
@@ -47,8 +47,12 @@ def geometric_transform(pose_tensors, similarity=False, nonlinear=True, as_3x3=F
     trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears = pose_tensors.split(1, dim=-1)
 
     if nonlinear:
-        trans_xs = torch.tanh(trans_xs * 5.)
-        trans_ys = torch.tanh(trans_ys * 5.)
+        k = 1/2
+        trans_xs = torch.tanh(trans_xs * k)
+        trans_ys = torch.tanh(trans_ys * k)
+
+        # trans_xs = torch.tanh(trans_xs * 5.)
+        # trans_ys = torch.tanh(trans_ys * 5.)
         scale_xs = torch.sigmoid(scale_xs) + 1e-2
         scale_ys = torch.sigmoid(scale_ys) + 1e-2
         shears = torch.tanh(shears * 5.)
@@ -75,12 +79,19 @@ def geometric_transform(pose_tensors, similarity=False, nonlinear=True, as_3x3=F
     poses = torch.cat(poses, -1)  # shape (... , 6)
 
     # Convert poses to 3x3 A matrix so: [y, 1] = A [x, 1]
-    if as_3x3:
-        poses = poses.reshape(poses.shape[:-1], 2, 3)
-        bottom_pad = torch.zeros(poses.shape[:-1], 1, 3)
+    if as_3x3 or inverse:
+        poses = poses.reshape(*poses.shape[:-1], 2, 3)
+        bottom_pad = torch.zeros(*poses.shape[:-2], 1, 3).cuda()
         bottom_pad[..., 2] = 1
         # shape (... , 2, 3) + shape (... , 1, 3) = shape (... , 3, 3)
-        poses = torch.stack([poses, bottom_pad], dim=-2)
+        poses = torch.cat([poses, bottom_pad], dim=-2)
+
+    if inverse:
+        poses = torch.inverse(poses)
+        if not as_3x3:
+            poses = poses[..., :2, :]
+            poses = poses.reshape(*poses.shape[:-2], 6)
+
     return poses
 
 
@@ -126,7 +137,7 @@ class MixtureDistribution(torch.distributions.Distribution):
     def mean(self, idx=None):
         # returns weighted average over all distributions
         if idx is not None:
-            return (self._means[idx] * self.mixing_prob[idx]).sum(dim=0).detach()
+            return (self._means[idx] * self.mixing_prob[idx]).sum(dim=0)
         else:
-            return (self._means * self.mixing_prob).sum(dim=1).detach()
+            return (self._means * self.mixing_prob).sum(dim=1)
 

@@ -133,4 +133,4 @@ dmypy.json
 
 /data
 /wandb
-/StackedCapsuleAutoencoders
+/semantic-convolutions
