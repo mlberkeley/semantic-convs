@@ -31,7 +31,7 @@ def parse_args():
 
     parser.add_argument(
         '--model',
-        type=str.lower, default='pcae',
+        type=str.lower, default='ocae',
         choices=['ccae', 'pcae', 'ocae', 'scae'],
         # todo(maximsmol): change default
         help='part of the model to run')
@@ -43,7 +43,8 @@ def parse_args():
         choices=['mnist'])
     parser.add_argument(
         '--data-workers',
-        type=int, default=len(os.sched_getaffinity(0)),
+        # default = len(os.sched_getaffinity(0))
+        type=int, default=0,
         metavar='NWORKERS',
         help='number of data loader workers')
 
@@ -86,6 +87,14 @@ def parse_args():
         '--ocae-lr',
         type=float, default=1e-1,
         help='learning rate')
+    ocae_args.add_argument(
+        '--ocae-lr-decay',
+        type=float, default=0,
+        help='learning rate decay')
+    ocae_args.add_argument(
+        '--ocae-weight-decay',
+        type=float, default=0,
+        help='weight decay')
 
 
     logger_args = parser.add_argument_group('Logger Parameters')

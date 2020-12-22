@@ -19,7 +19,7 @@ class SetTransformer(nn.Module):
         super(SetTransformer, self).__init__()
         self._n_layers = n_layers
         self._n_heads = n_heads
-        self._n_dims = n_dims
+        self._n_dim = n_dims
         self._n_output_dims = n_output_dims
         self._n_outputs = n_outputs
         self._layer_norm = layer_norm
@@ -31,7 +31,8 @@ class SetTransformer(nn.Module):
         batch_size = int(x.shape[0])
 
         # generic linear mlp applied over whole batch
-        h = nn.Linear(self._n_dim)(x)
+        print("$$$$$$$$", x.shape)
+        h = nn.Linear(self._n_dim, self._n_dim)(x)
 
         args = [self._n_heads, self._layer_norm, self._dropout_rate]
         klass = SelfAttention
@@ -44,7 +45,7 @@ class SetTransformer(nn.Module):
         # From Paper: Encoder(X) := SAB(SAB(X)) : SAB = Self-Attention Block
         for _ in range(self._n_layers):
             h = klass(*args)(h, presence)
-        z = nn.Linear(self._n_output_dims)(h)
+        z = nn.Linear(self._n_output_dims, self._n_output_dims)(h)
 
         # From Paper: Decoder(Z) = rFF(SAB(PMA_k(Z)))
         # s.t. rFF is a row-wise (sample independent) Feed-Forward Layer
@@ -158,7 +159,7 @@ class SelfAttention(nn.Module):
             y = nn.LayerNorm(y[1:])(y)
 
         # Two layers of row-wise (independent) feed-forward
-        h = nn.Linear(n_dims)(nn.Linear(2*n_dims)(x))
+        h = nn.Linear(n_dims, n_dims)(nn.Linear(2*n_dims, n_dims)(x))
 
         if self._dropout_rate > 0.:
             h = nn.Dropout(self._dropout_rate)(h)

@@ -1,10 +1,10 @@
 import numpy as np
 import torch.nn as nn
 import torch
-from scae.modules import attention as _attention
-from scae.modules import capsule as _capsule
+import modules.attention as _attention
+import modules.capsule as _capsule
 from attrdict import AttrDict
-import scae.util.math as math
+from util import math as math
 import torch.nn.functional as F
 import torch.distributions as D
 import collections

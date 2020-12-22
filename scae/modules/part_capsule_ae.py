@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-import scae.util.math as math_utils
+import util.math as math_utils
 
 class ConvAttn(nn.Module):
     def __init__(self, n_caps, n_dims, in_channels=128):
@@ -89,7 +89,7 @@ class CapsuleImageEncoder(nn.Module):
         presence_logits = presence_logits.squeeze(-1)
         if self._noise_scale > 0.:  # TODO: why do this???
             # Add uniform [-self._noise_scale/2, self._noise_scale/2] noise to logits
-            presence_logits = presence_logits + ((torch.rand(presence_logits.shape).cuda() - .5) * self._noise_scale)
+            presence_logits = presence_logits + ((torch.rand(presence_logits.shape) - .5) * self._noise_scale)
         presences = torch.sigmoid(presence_logits)
 
         return EasyDict(
@@ -182,7 +182,7 @@ class TemplateImageDecoder(nn.Module):
         transformed_templates = nn.functional.grid_sample(template_stack, grid_coords).view(template_batch_shape)
 
         bg_value = torch.sigmoid(self.bg_value)
-        bg_image = torch.zeros(batch_size, 1, self._n_channels, *self._output_size).cuda() + bg_value
+        bg_image = torch.zeros(batch_size, 1, self._n_channels, *self._output_size) + bg_value
 
         # presences          shape (batch_size, self._n_caps)
         presence_probs = presences.view(batch_size, self._n_caps, 1, 1, 1)

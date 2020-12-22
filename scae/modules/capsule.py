@@ -2,7 +2,7 @@ import numpy as np
 import torch.nn as nn
 import torch
 from attrdict import AttrDict
-import scae.util.math as math
+from util import math as math
 import torch.nn.functional as F
 import torch.distributions as D
 import collections
@@ -42,17 +42,20 @@ class CapsuleLayer(nn.Module):
       self.splits = [np.prod(i).astype(np.int32) for i in self.output_shapes]
       self.n_outputs = sum(self.splits)
       
-      self.build(self._n_hiddens, self._n_caps_params, self.n_outputs)
+      self.build()
       
-    def build(self, n_hiddens, n_params, n_out):
+    def build(self):
         self.mlp = nn.ModuleList()
-        for n_hidden in n_hiddens + [n_params]:
-            self.mlp.append(nn.Linear(n_hidden))
+        shape_list = [16, self._n_hiddens, self._n_caps_params]
+        for i in range(1, len(shape_list)):
+            self.mlp.append(nn.Linear(shape_list[i-1], shape_list[i]))
             self.mlp.append(nn.ReLU())
         
         self.caps_mlp = nn.ModuleList()
-        for n_hidden in [n_hiddens, n_out]:
-            self.caps_mlp.append(nn.Linear(n_hidden, bias = False))
+        shape_list = [32, self._n_hiddens, self.n_outputs]
+        for i in range(1, len(shape_list)):
+            self.caps_mlp.append(nn.Linear(shape_list[i-1],
+                                           shape_list[i], bias = False))
             self.caps_mlp.append(nn.ReLU())
         
         
@@ -309,11 +312,6 @@ class CapsuleLikelihood(OrderInvariantCapsuleLikelihood):
             mixing_logits=mixing_logits,
             mixing_log_prob=mixing_log_prob,
         )
-
-
-
-
-
 
 def _capsule_entropy(caps_presence_prob, k=1, **unused_kwargs):
     del unused_kwargs

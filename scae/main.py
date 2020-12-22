@@ -12,7 +12,7 @@ from torchvision import transforms
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
-from scae.args import parse_args
+from args import parse_args
 
 def main():
     args = parse_args()
@@ -59,8 +59,8 @@ def main():
 
 
     if args.model == 'ccae':
-        from scae.modules.constellation_ae import SetTransformer, ConstellationCapsule
-        from scae.models.ccae import CCAE
+        from modules.constellation_ae import SetTransformer, ConstellationCapsule
+        from models.ccae import CCAE
 
         encoder = SetTransformer()
         decoder = ConstellationCapsule()
@@ -69,8 +69,8 @@ def main():
         # logger.watch(encoder._encoder, log='all', log_freq=args.log_frequency)
         # logger.watch(decoder, log='all', log_freq=args.log_frequency)
     elif args.model == 'pcae':
-        from scae.modules.part_capsule_ae import CapsuleImageEncoder, TemplateImageDecoder
-        from scae.models.pcae import PCAE
+        from modules.part_capsule_ae import CapsuleImageEncoder, TemplateImageDecoder
+        from models.pcae import PCAE
 
         encoder = CapsuleImageEncoder(
             args.pcae_num_caps, args.pcae_caps_dim, args.pcae_feat_dim)
@@ -80,20 +80,33 @@ def main():
 
         logger.watch(encoder._encoder, log='all', log_freq=args.log_frequency)
         logger.watch(decoder, log='all', log_freq=args.log_frequency)
+    
     elif args.model == 'ocae':
-        from scae.modules.object_capsule_ae import SetTransformer, ImageCapsule
-        from scae.models.ocae import OCAE
+        from modules.object_capsule_ae import ImageCapsule
+        from modules.attention import SetTransformer
+        from models.ocae import OCAE
+        from modules.part_capsule_ae import CapsuleImageEncoder, TemplateImageDecoder
+        from models.pcae import PCAE
 
-        encoder = SetTransformer()
-        decoder = ImageCapsule()
-        model = OCAE(encoder, decoder, args)
-
+        p_encoder = CapsuleImageEncoder(
+            args.pcae_num_caps, args.pcae_caps_dim, args.pcae_feat_dim)
+        p_decoder = TemplateImageDecoder(
+            args.pcae_num_caps, use_alpha_channel=args.alpha_channel, output_size=(40, 40))
+        
+        encoder = SetTransformer(n_layers=3, n_heads=1, n_dims=16,
+                                 n_output_dims=256, n_outputs=10)
+        decoder = ImageCapsule(n_caps=10, n_caps_dims=2, n_votes=16,
+                               n_caps_params=32, n_hiddens=128, 
+                               learn_vote_scale=True, deformations=True,
+                               noise_type='uniform', noise_scale=4.,
+                               similarity_transform=False)
+        model = OCAE(encoder, decoder, p_encoder, p_decoder, args)
         #  TODO: after ccae #
     else:
         raise NotImplementedError()
 
     # Execute Experiment
-    trainer = pl.Trainer(gpus=1, max_epochs=args.num_epochs, logger=logger)
+    trainer = pl.Trainer(gpus=0, max_epochs=args.num_epochs, logger=logger)
     trainer.fit(model, train_dataloader)
 
 if __name__ == "__main__":
