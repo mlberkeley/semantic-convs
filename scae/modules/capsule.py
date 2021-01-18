@@ -31,7 +31,6 @@ class CapsuleLayer(nn.Module):
 
       assert n_caps_dims == 2, ('This is the only value implemented now due to '
                               'the restriction of similarity transform.')
-      
       self.output_shapes = (
             [self._n_votes, self._n_transform_params],  # CPR_dynamic
             [1, self._n_transform_params],  # CCR
@@ -52,11 +51,12 @@ class CapsuleLayer(nn.Module):
         #    self.mlp.append(nn.ReLU())
         #self.mlp = nn.Sequential(self.mlp)
         
-        self.mlp = nn.Sequential(nn.Linear(16, self._n_hiddens), nn.ReLU(),
-                                 nn.Linear(self._n_hiddens, self._n_caps_params),
+        self.mlp = nn.Sequential(nn.Linear(32*256, 32*self._n_hiddens), nn.ReLU(),
+                                 nn.Linear(32*self._n_hiddens, self._n_caps*self._n_caps_params),
                                  nn.ReLU())
-        self.caps_mlp = nn.Sequential(nn.Linear(32, self._n_hiddens), nn.ReLU(),
-                                 nn.Linear(self._n_hiddens, self.n_outputs),
+        self.caps_mlp = nn.Sequential(nn.Linear(self._n_caps*(self._n_caps_params+1),
+                                                32*self._n_hiddens), nn.ReLU(),
+                                 nn.Linear(32*self._n_hiddens, 32*self.n_outputs),
                                  nn.ReLU())
         
         #self.caps_mlp = []
@@ -70,10 +70,9 @@ class CapsuleLayer(nn.Module):
     def forward(self, x, parent_transform=None, parent_presence=None):
         batch_size = x.shape[0]
         
-        print(x.shape, "eihbvf")
-        
         batch_shape = [batch_size, self._n_caps]
         if self._n_caps_params is not None:
+            x = torch.flatten(x, start_dim=1)
             raw_caps_params = self.mlp(x)
             caps_params = torch.reshape(raw_caps_params,
                                    batch_shape + [self._n_caps_params])
@@ -88,37 +87,47 @@ class CapsuleLayer(nn.Module):
                                         dtype=torch.float32)
             caps_exist = pmf.sample(batch_shape + [1])
         
-        # caps_params = torch.cat([caps_params, caps_exist], -1)
+        caps_params = torch.cat([caps_params, caps_exist], -1)
+        caps_params = torch.flatten(caps_params, start_dim=1)
         all_params = self.caps_mlp(caps_params)
+        all_params = torch.reshape(all_params, (128, 32, 327))
         all_params = torch.split(all_params, self.splits, -1)
+        
         res = [torch.reshape(i, batch_shape + s)
            for (i, s) in zip(all_params, self.output_shapes)]
+        
         cpr_dynamic = res[0]
         
+        # ADD BIASES
         # res = [snt.AddBias()(i) for i in res[1:]]
-        print(len(res))
-        ccr, pres_logit_per_caps, pres_logit_per_vote, scale_per_vote, _ = res
+        _, ccr, pres_logit_per_caps, pres_logit_per_vote, scale_per_vote = res
         
+
         if self._caps_dropout_rate != 0.0:
             pres_logit_per_caps += math.safe_log(caps_exist)
         
-        cpr_static = torch.empty(size=[1, self._n_caps, self._n_votes,
+        
+        # WTF IS CPR STATIC AND WHY DOES IT EXIST
+        cpr_static = torch.zeros(size=[1, self._n_caps, self._n_votes,
                                         self._n_transform_params],
                                   requires_grad=True)
-        
         pres_logit_per_caps = math.add_noise(pres_logit_per_caps)
         pres_logit_per_vote = math.add_noise(pres_logit_per_vote)       
         
         if parent_transform is None:
-            ccr = math.geometric_transform(ccr)
+            ccr = math.geometric_transform(ccr, as_3x3=True, similarity=True)
         else:
             ccr = parent_transform
         if not self._deformations:
             cpr_dynamic = torch.zeros_like(cpr_dynamic)
+
+        cpr = math.geometric_transform(cpr_dynamic + cpr_static, as_3x3=True,
+                                       similarity=True)
         
-        cpr = math.geometric_transform(cpr_dynamic + cpr_static)
-        print(ccr.shape, "BEJBCWS")
-        ccr_per_vote = ccr.repeat((2, self._n_votes))
+        # FIX THIS REPEAT ERROR
+        #ccr_per_vote = ccr.repeat((1,1,self._n_votes,1,1))
+        ccr_per_vote = ccr
+        
         votes = torch.matmul(ccr_per_vote, cpr)
         
         if parent_presence is not None:
@@ -127,7 +136,7 @@ class CapsuleLayer(nn.Module):
             pres_per_caps = torch.sigmoid(pres_logit_per_caps)
         
         pres_per_vote = pres_per_caps * torch.sigmoid(pres_logit_per_vote)
-
+        
         if self._learn_vote_scale:
             scale_per_vote = F.softplus(scale_per_vote + .5) + 1e-2
         else:
@@ -172,6 +181,7 @@ class OrderInvariantCapsuleLikelihood(nn.Module):
     
     def forward(self, x, presence=None):
         self.batch_size, self.n_input_points = x.shape[:2].as_list()
+        
         expanded_x = x.unsqueeze(dim=2)
         vote_log_prob_per_dim = self.vote_component_pdf.log_prob(expanded_x)
         vote_log_prob = torch.sum(vote_log_prob_per_dim, dim=-1)
@@ -239,7 +249,7 @@ class OrderInvariantCapsuleLikelihood(nn.Module):
     
     def _get_pdf(self, votes, scale):
         if self._pdf == 'normal':
-          pdf = torch.Normal(votes, scale)
+          pdf = D.normal.Normal(votes, scale)
         else:
           raise ValueError('Distribution "{}" not '
                            'implemented!'.format(self._pdf))
@@ -255,16 +265,18 @@ class CapsuleLikelihood(OrderInvariantCapsuleLikelihood):
         self.vote_component_pdf = self._get_pdf(self._votes,
                                        self._scales.unsqueeze(dim=-1))
     def forward(self, x, presence=None):
-        batch_size, n_input_points = x.shape[:2].as_list()
+        batch_size, n_input_points = list(x.shape[:2])
         expanded_x = x.unsqueeze(dim=1)
         vote_log_prob_per_dim = self.vote_component_pdf.log_prob(expanded_x)
         vote_log_prob = torch.sum(vote_log_prob_per_dim, dim=-1)
         dummy_vote_log_prob = torch.zeros([batch_size, 1, n_input_points])
-        dummy_vote_log_prob -= 2. * torch.log(10.)
+        # log(10) being used
+        dummy_vote_log_prob -= 2. * 2.30258
         vote_log_prob = torch.cat([vote_log_prob, dummy_vote_log_prob], dim=1)
         mixing_logits = math.safe_log(self._vote_presence_prob)
-        dummy_logit = torch.zeros([batch_size, 1, 1]) -2. * torch.log(10.)
-        dummy_logit = dummy_logit.tile((2, self.n_input_points))
+        dummy_logit = torch.zeros([batch_size, 1, 1]) -2. * 2.30258
+        dummy_logit = dummy_logit.repeat((1,1,n_input_points))
+        
         mixing_logits = torch.cat([mixing_logits, dummy_logit], dim=1)
         mixing_log_prob = mixing_logits - torch.logsumexp(mixing_logits, dim=1,
                                                           keepdims=True)
@@ -280,16 +292,20 @@ class CapsuleLikelihood(OrderInvariantCapsuleLikelihood):
         posterior_mixing_logits_per_point = mixing_logits + vote_log_prob
         winning_vote_idx = torch.argmax(
             posterior_mixing_logits_per_point[:, :-1], dim=1)
-        batch_idx = torch.range(batch_size,
+        batch_idx = torch.range(0, batch_size-1,
                                 dtype=torch.int64).unsqueeze(dim=1)
-        batch_idx = batch_idx.tile((1, self.n_input_points))
-        point_idx = torch.range(self.n_input_points,
+        batch_idx = batch_idx.repeat((1, n_input_points))
+        point_idx = torch.range(0, n_input_points-1,
                                 dtype=torch.int64).unsqueeze(dim=0)
-        point_idx = point_idx.tile((0, batch_size))
-        
+        point_idx = point_idx.repeat((batch_size, 1))
         idx = torch.stack([batch_idx, winning_vote_idx, point_idx], dim=-1)
-        winning_vote = torch.index_select(self._votes, idx)
-        winning_pres = torch.index_select(self._vote_presence_prob, idx)
+        
+        # winning_vote = torch.index_select(self._votes, idx)
+        # winning_pres = torch.index_select(self._vote_presence_prob, idx)
+        
+        #PERMUTE WAS USED AS A DIRTY WORKAROUND
+        winning_vote = self._votes[list(idx.T)].permute(1, 0, 2)
+        winning_pres = self._vote_presence_prob[list(idx.T)]
         vote_presence = torch.gt(mixing_logits[:, :-1],
                                mixing_logits[:, -1:])
         is_from_capsule = winning_vote_idx // self._n_votes
@@ -298,19 +314,17 @@ class CapsuleLikelihood(OrderInvariantCapsuleLikelihood):
         ### UNFINISHED ###
         dummy_vote = torch.empty(self._votes[:1, :1].shape)
         nn.init.uniform_(dummy_vote)
-        dummy_vote = dummy_vote.tile((0, batch_size))
+        dummy_vote = dummy_vote.repeat((batch_size, 1, 1, 1))
         dummy_pres = torch.zeros((batch_size, 1, n_input_points))
         votes = torch.cat((self._votes, dummy_vote), 1)
         pres = torch.cat([self._vote_presence_prob, dummy_pres], 1)
     
-        soft_winner = torch.sum((posterior_mixing_probs,
-                                 -1).unsqueeze(1) * votes, 1)
+        soft_winner = torch.sum(posterior_mixing_probs.unsqueeze(-1) * votes,
+                                dim=1)
         soft_winner_pres = torch.sum(
             posterior_mixing_probs * pres, dim=1)
     
-        posterior_mixing_probs = torch.permute(
-            posterior_mixing_probs[:, :-1], (0, 2, 1))
-    
+        posterior_mixing_probs = posterior_mixing_probs[:, :-1].permute(0, 2, 1)
         assert winning_vote.shape == x.shape
     
         return self.OutputTuple(

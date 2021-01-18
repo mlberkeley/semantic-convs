@@ -13,8 +13,8 @@ def safe_ce(labels, probs, axis=-1):
 
 def safe_log(tensor, eps=1e-16):
     is_zero = tensor.le(eps)
-    tensor = torch.where(is_zero, torch.ones_like(tensor).to('cuda'), tensor)
-    tensor = torch.where(is_zero, torch.zeros_like(tensor).to('cuda') - 1e8,
+    tensor = torch.where(is_zero, torch.ones_like(tensor).to(tensor.device), tensor)
+    tensor = torch.where(is_zero, torch.zeros_like(tensor).to(tensor.device) - 1e8,
                          torch.log(tensor))
     return tensor
 

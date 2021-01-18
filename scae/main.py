@@ -159,11 +159,11 @@ def main():
         p_encoder = CapsuleImageEncoder(
             args.pcae_num_caps, args.pcae_caps_dim, args.pcae_feat_dim)
         p_decoder = TemplateImageDecoder(
-            args.pcae_num_caps, use_alpha_channel=args.alpha_channel, output_size=(40, 40))
-        
+            args.pcae_num_caps, use_alpha_channel=args.alpha_channel,
+            output_size=(40, 40))
         encoder = SetTransformer(n_layers=3, n_heads=1, n_dims=16,
                                  n_output_dims=256, n_outputs=10)
-        decoder = ImageCapsule(n_caps=16, n_caps_dims=2, n_votes=16,
+        decoder = ImageCapsule(n_caps=32, n_caps_dims=2, n_votes=args.pcae_num_caps,
                                n_caps_params=32, n_hiddens=128, 
                                learn_vote_scale=True, deformations=True,
                                noise_type='uniform', noise_scale=4.,

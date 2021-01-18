@@ -25,7 +25,6 @@ class OCAE(pl.LightningModule):
         self.lr = args.ocae_lr
         self.lr_decay = args.ocae_lr_decay
         self.weight_decay = args.ocae_weight_decay
-
         self.n_classes = args.num_classes
         self.mse = nn.MSELoss()
 
@@ -33,7 +32,6 @@ class OCAE(pl.LightningModule):
         """Forward pass.
 
         Additional details here..."""
-        print("$$$$$$$$$$", points.shape)
         primary_caps = self.p_encoder(points)
         capsules = self.encoder(points)
         reconstruction = self.decoder(capsules.poses, capsules.presences)
@@ -41,9 +39,7 @@ class OCAE(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         ## TODO ##
-        print("$$$$$$$$$$", batch[0].shape)
         primary_caps = self.p_encoder(batch[0])
-        print(primary_caps.keys())
         pres = primary_caps.presences
         pose = primary_caps.poses
         expanded_pres = pres.unsqueeze(dim=-1)
@@ -51,12 +47,14 @@ class OCAE(pl.LightningModule):
         input_pose = torch.cat([input_pose, primary_caps.features], -1)
         n_templates = int(primary_caps.poses.shape[1])
         # templates = self.p_decoder(n_templates, primary_caps.features)
-        print(input_pose.shape)
-        h = self.encoder(input_pose, pres)
-        print(type(h), "GEEEEEEEEE")
-        target_pose, target_pres = pose, pres
-        res = self.decoder(h, target_pose, target_pres)
         
+        # h = self.encoder(input_pose, pres)
+        h = torch.rand(128, 32, 256)
+        target_pose, target_pres = pose, pres
+        
+        
+        res = self.decoder(h, target_pose, target_pres)
+        print(res.shape)
         """
         img, labels = batch
         batch_size = img.shape[0]

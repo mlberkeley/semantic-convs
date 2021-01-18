@@ -52,7 +52,7 @@ def parse_args():
     pcae_args = parser.add_argument_group('PCAE Parameters')
     pcae_args.add_argument(
         '--pcae-num-caps',
-        type=int, default=16,
+        type=int, default=40,
         metavar='PCAE_NCAPS',
         help='number of capsules')
     pcae_args.add_argument(
