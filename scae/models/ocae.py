@@ -48,12 +48,19 @@ class OCAE(pl.LightningModule):
         n_templates = int(primary_caps.poses.shape[1])
         # templates = self.p_decoder(n_templates, primary_caps.features)
         
-        h = self.encoder(input_pose, pres)
+        
+        # input_pose = torch.ones((32, 11, 2))
+        
+        print("INPUT POSE", input_pose.shape, "INPUT PRES", pres.shape)
+        
+        h = self.encoder(input_pose)
+        
+        
         # h = torch.rand(128, 32, 256)
         target_pose, target_pres = pose, pres
-        print(h.shape)
+        print("H SHAPE", h.shape)
         
-        res = self.decoder(h, target_pose, target_pres)
+        # res = self.decoder(h, target_pose, target_pres)
         """
         img, labels = batch
         batch_size = img.shape[0]
@@ -66,7 +73,7 @@ class OCAE(pl.LightningModule):
 
         rec_mse = self.mse(rec.pdf.mean(), img)
         self.log('rec_mse', rec_mse.detach(), prog_bar=True)
-
+        
         if batch_idx == 100: #% 10 == 0:
             n = 8
             gt_imgs = [to_wandb_im(img[i], caption='gt_image') for i in range(n)]
@@ -87,7 +94,8 @@ class OCAE(pl.LightningModule):
                 'mixture_logits': mixture_logit_imgs,
                 'epoch': self.current_epoch},
                 commit=False)
-
+        """
+        """
         loss = -rec_ll * self.args.pcae_loss_ll_coeff + \
                temp_l1 * self.args.pcae_loss_temp_l1_coeff + \
                rec_mse * self.args.pcae_loss_mse_coeff

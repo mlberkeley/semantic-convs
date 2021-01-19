@@ -17,7 +17,7 @@ class SetTransformer(nn.Module):
                  n_input_dims,  # Last dimension of input
                  n_layers=5,  # number of attention blocks
                  n_heads=4,
-                 n_dims=128,  # hidden layer dimension
+                 n_dims=40*128,  # hidden layer dimension
                  n_output_dims=32,
                  n_outputs=3,
                  layer_norm=False,
@@ -58,7 +58,7 @@ class MAB(nn.Module):
 
     def forward(self, Q, K):
         Q = self.fc_q(Q)
-        print(K.shape)
+        print("K SHAPE", K.shape)
         K, V = self.fc_k(K), self.fc_v(K)
 
         dim_split = self.dim_V // self.num_heads
@@ -92,6 +92,7 @@ class ISAB(nn.Module):
         self.mab1 = MAB(dim_in, dim_out, dim_out, num_heads, ln=ln)
 
     def forward(self, X):
+        print("SHAPE OF X", X.shape)
         H = self.mab0(self.I.repeat(X.size(0), 1, 1), X)
         return self.mab1(X, H)
 
