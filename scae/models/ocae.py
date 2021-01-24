@@ -39,6 +39,7 @@ class OCAE(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         ## TODO ##
+        batch = batch.to("cuda")
         primary_caps = self.p_encoder(batch[0])
         pres = primary_caps.presences
         pose = primary_caps.poses

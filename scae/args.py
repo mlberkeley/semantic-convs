@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument(
         '--data-workers',
         # default = len(os.sched_getaffinity(0))
-        type=int, default=0,
+        type=int, default=1,
         metavar='NWORKERS',
         help='number of data loader workers')
 

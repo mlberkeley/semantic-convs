@@ -17,7 +17,7 @@ class SetTransformer(nn.Module):
                  n_input_dims,  # Last dimension of input
                  n_layers=5,  # number of attention blocks
                  n_heads=4,
-                 n_dims=40*128,  # hidden layer dimension
+                 n_dims=128,  # hidden layer dimension
                  n_output_dims=32,
                  n_outputs=3,
                  layer_norm=False,
@@ -40,6 +40,7 @@ class SetTransformer(nn.Module):
             nn.Linear(n_dims, n_output_dims))
 
     def forward(self, X):
+        print("INITIAL X", X.shape)
         return self.dec(self.enc(X))
 
 
@@ -49,18 +50,32 @@ class MAB(nn.Module):
         self.dim_V = dim_V
         self.num_heads = num_heads
         self.fc_q = nn.Linear(dim_Q, dim_V)
-        self.fc_k = nn.Linear(dim_K, dim_V)
-        self.fc_v = nn.Linear(dim_K, dim_V)
+        self.fc_k = nn.Linear(dim_K, 40*dim_V)
+        self.fc_v = nn.Linear(dim_K, 40*dim_V)
         if ln:
             self.ln0 = nn.LayerNorm(dim_V)
             self.ln1 = nn.LayerNorm(dim_V)
         self.fc_o = nn.Linear(dim_V, dim_V)
 
     def forward(self, Q, K):
+        
+        print("Q shape:", Q.shape, ", Layer:", self.fc_q.in_features,
+              self.fc_q.out_features)
+        
         Q = self.fc_q(Q)
-        print("K SHAPE", K.shape)
+        K = torch.flatten(K, start_dim=1)
+        
+        print("K shape:", K.shape, ", Layer:", self.fc_k.in_features,
+              self.fc_k.out_features)
+        print("V shape:", K.shape, ", Layer:", self.fc_v.in_features,
+              self.fc_v.out_features)
+        
         K, V = self.fc_k(K), self.fc_v(K)
-
+        
+        # make more robust as it is really (Batch, n_templates, n_dims)
+        K = torch.reshape(K, (128, 40, 128))
+        V = torch.reshape(K, (128, 40, 128))
+        
         dim_split = self.dim_V // self.num_heads
         Q_ = torch.cat(Q.split(dim_split, 2), 0)
         K_ = torch.cat(K.split(dim_split, 2), 0)
@@ -88,13 +103,12 @@ class ISAB(nn.Module):
         super(ISAB, self).__init__()
         self.I = nn.Parameter(torch.Tensor(1, num_inds, dim_out))
         nn.init.xavier_uniform_(self.I)
-        self.mab0 = MAB(dim_out, dim_in, dim_out, num_heads, ln=ln)
-        self.mab1 = MAB(dim_in, dim_out, dim_out, num_heads, ln=ln)
+        self.mab0 = MAB(dim_out, 40*dim_in, dim_out, num_heads, ln=ln)
+        self.mab1 = MAB(40*dim_in, 32*dim_out, 32*dim_out, num_heads, ln=ln)
 
     def forward(self, X):
-        print("SHAPE OF X", X.shape)
         H = self.mab0(self.I.repeat(X.size(0), 1, 1), X)
-        return self.mab1(X, H)
+        return self.mab1(torch.flatten(X, start_dim=1), H)
 
 
 class PMA(nn.Module):
