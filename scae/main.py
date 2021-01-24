@@ -36,7 +36,8 @@ def main():
     if args.debug:
         torch.autograd.set_detect_anomaly(True)
 
-
+    dataloader_args = EasyDict(batch_size=args.batch_size, shuffle=False,
+                               num_workers=0 if args.debug else args.data_workers)
     if args.dataset == 'mnist':
         args.num_classes = 10
         args.im_channels = 1
@@ -49,14 +50,10 @@ def main():
             transforms.ToTensor(),
             # norm_1c
         ])
-
-        train_dataset = MNIST(data_path/'mnist', train=True, transform=t, download=True)
-        train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
-
-        val_dataset = MNIST(data_path/'mnist', train=False, transform=t, download=True)
-        val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
+        train_dataloader = DataLoader(MNIST(data_path/'mnist', train=True, transform=t, download=True),
+                                      **dataloader_args)
+        val_dataloader = DataLoader(MNIST(data_path/'mnist', train=False, transform=t, download=True),
+                                    **dataloader_args)
     elif args.dataset == 'usps':
         args.num_classes = 10
         args.im_channels = 1
@@ -69,14 +66,10 @@ def main():
             transforms.ToTensor(),
             # norm_1c
         ])
-
-        train_dataset = USPS(data_path/'usps', train=True, transform=t, download=True)
-        train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
-
-        val_dataset = USPS(data_path/'usps', train=False, transform=t, download=True)
-        val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
+        train_dataloader = DataLoader(USPS(data_path/'usps', train=True, transform=t, download=True),
+                                      **dataloader_args)
+        val_dataloader = DataLoader(USPS(data_path/'usps', train=False, transform=t, download=True),
+                                    **dataloader_args)
     elif args.dataset == 'cifar10':
         args.num_classes = 10
         args.im_channels = 3
@@ -87,14 +80,10 @@ def main():
         t = transforms.Compose([
             transforms.ToTensor()
         ])
-
-        train_dataset = CIFAR10(data_path/'cifar10', train=True, transform=t, download=True)
-        train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
-
-        val_dataset = CIFAR10(data_path/'cifar10', train=False, transform=t, download=True)
-        val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
+        train_dataloader = DataLoader(CIFAR10(data_path/'cifar10', train=True, transform=t, download=True),
+                                      **dataloader_args)
+        val_dataloader = DataLoader(CIFAR10(data_path/'cifar10', train=False, transform=t, download=True),
+                                    **dataloader_args)
     elif args.dataset == 'svhn':
         args.num_classes = 10
         args.im_channels = 3
@@ -105,24 +94,19 @@ def main():
         t = transforms.Compose([
             transforms.ToTensor()
         ])
-
-        train_dataset = SVHN(data_path/'svhn', split='train', transform=t, download=True)
-        train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
-
-        val_dataset = SVHN(data_path/'svhn', split='test', transform=t, download=True)
-        val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.data_workers)
+        train_dataloader = DataLoader(SVHN(data_path/'svhn', split='train', transform=t, download=True),
+                                      **dataloader_args)
+        val_dataloader = DataLoader(SVHN(data_path/'svhn', split='test', transform=t, download=True),
+                                    **dataloader_args)
     else:
         raise NotImplementedError()
 
 
     logger = WandbLogger(
-        project=args.log_project,
-        name=args.log_run_name,
-        entity=args.log_team,
-        config=args, offline=not args.log_upload)
-
+        project=args.log.project,
+        name=args.log.run_name,
+        entity=args.log.team,
+        config=args, offline=not args.log.upload)
 
     if args.model == 'ccae':
         from modules.constellation_ae import SetTransformer, ConstellationCapsule
@@ -138,12 +122,8 @@ def main():
         from modules.part_capsule_ae import CapsuleImageEncoder, TemplateImageDecoder
         from models.pcae import PCAE
 
-        encoder = CapsuleImageEncoder(
-            args.pcae_num_caps, args.pcae_caps_dim, args.pcae_feat_dim,
-            input_channels=args.im_channels)
-        decoder = TemplateImageDecoder(
-            args.pcae_num_caps, use_alpha_channel=args.alpha_channel, output_size=args.image_size,
-            n_channels=args.im_channels)
+        encoder = CapsuleImageEncoder(args)
+        decoder = TemplateImageDecoder(args)
         model = PCAE(encoder, decoder, args)
 
         logger.watch(encoder._encoder, log='all', log_freq=args.log_frequency)
@@ -171,13 +151,30 @@ def main():
                                similarity_transform=False)
         model = OCAE(encoder, decoder, p_encoder, p_decoder, args)
         #  TODO: after ccae #
+        logger.watch(encoder._encoder, log='all', log_freq=args.log.frequency)
+        logger.watch(decoder, log='all', log_freq=args.log.frequency)
+    elif args.model == 'ocae':
+        from scae.modules.object_capsule_ae import SetTransformer, ImageCapsule
+        from scae.models.ocae import OCAE
+
+        encoder = SetTransformer()
+        decoder = ImageCapsule()
+        model = OCAE(encoder, decoder, args)
+
+        #  TODO: after ccae
     else:
         raise NotImplementedError()
 
     # Execute Experiment
     lr_logger = cb.LearningRateMonitor(logging_interval='step')
+
     trainer = pl.Trainer(gpus=0, max_epochs=args.num_epochs, logger=logger, callbacks=[lr_logger])
     trainer.fit(model, train_dataloader)
+    best_checkpointer = cb.ModelCheckpoint(save_top_k=1, monitor='val_rec_ll', filepath=logger.experiment.dir)
+    last_checkpointer = cb.ModelCheckpoint(save_last=True, filepath=logger.experiment.dir)
+    trainer = pl.Trainer(gpus=1, max_epochs=args.num_epochs, logger=logger,
+                         callbacks=[lr_logger, best_checkpointer, last_checkpointer])
+    trainer.fit(model, train_dataloader, val_dataloader)
 
 if __name__ == "__main__":
     main()

@@ -40,22 +40,16 @@ class ConvAttn(nn.Module):
 
 
 class CapsuleImageEncoder(nn.Module):
-    def __init__(self,
-               n_caps=16,
-               caps_dim=6,
-               feat_dim=16,
-               noise_scale=4.,
-               similarity_transform=False,
-               input_channels=1):
+    def __init__(self, args):
         super(CapsuleImageEncoder, self).__init__()
-        self._n_caps = n_caps
-        self._caps_dim = caps_dim
-        self._feat_dim = feat_dim
-        self._noise_scale = noise_scale
-        self._similarity_transform = similarity_transform
+        self._n_caps = args.pcae.num_caps
+        self._caps_dim = args.pcae.caps_dim
+        self._feat_dim = args.pcae.feat_dim
+        self._noise_scale = args.pcae.encoder.noise_scale
+        self._inverse_space_transform = args.pcae.encoder.inverse_space_transform
 
         # Image embedding encoder
-        channels = [input_channels, 128, 128, 128, 128]
+        channels = [args.im_channels, 128, 128, 128, 128]
         strides = [2, 2, 1, 1]
         layers = []
         for i in range(4):
@@ -67,7 +61,7 @@ class CapsuleImageEncoder(nn.Module):
         # Conv attention
         self._splits = [self._caps_dim, self._feat_dim, 1]  # 1 for presence
         self._n_dims = sum(self._splits)
-        self._attn = ConvAttn(n_caps, self._n_dims)
+        self._attn = ConvAttn(self._n_caps, self._n_dims)
 
     def forward(self, x):
         """
@@ -82,7 +76,7 @@ class CapsuleImageEncoder(nn.Module):
         poses, features, presence_logits = preds.split(self._splits, dim=-1)
 
         # Tensor of shape (batch_size, self._n_caps, 6)
-        poses = math_utils.geometric_transform(poses, self._similarity_transform)
+        poses = math_utils.geometric_transform(poses, True, inverse=self._inverse_space_transform)
 
         if self._feat_dim == 0:
             features = None
@@ -111,25 +105,17 @@ def get_nonlin(name):
 
 
 class TemplateImageDecoder(nn.Module):
-    def __init__(self,
-               n_caps=16,
-               output_size=(40, 40),
-               template_size=(11, 11),
-               n_channels=1,
-               colorize_templates=True,
-               template_nonlin='sigmoid',
-               color_nonlin='sigmoid',
-               use_alpha_channel=True):
+    def __init__(self, args):
         super(TemplateImageDecoder, self).__init__()
-        self._n_caps = n_caps
-        self._output_size = output_size
-        self._template_size = template_size
-        self._n_channels = n_channels
-        self._colorize_templates = colorize_templates
+        self._n_caps = args.pcae.num_caps
+        self._output_size = args.pcae.decoder.output_size
+        self._template_size = args.pcae.decoder.template_size
+        self._n_channels = args.im_channels
+        self._colorize_templates = False
 
-        self._template_nonlin = get_nonlin(template_nonlin)
-        self._color_nonlin = get_nonlin(color_nonlin)
-        self._use_alpha_channel = use_alpha_channel
+        self._template_nonlin = get_nonlin(args.pcae.decoder.template_nonlin)
+        self._color_nonlin = get_nonlin(args.pcae.decoder.color_nonlin)
+        self._use_alpha_channel = args.pcae.decoder.alpha_channel
 
         assert len(self._template_size) == 2, 'Template size must be of dim 2'
         self.init_templates()
@@ -159,7 +145,7 @@ class TemplateImageDecoder(nn.Module):
         else:
             self.temperature_logit = torch.nn.Parameter(torch.tensor([0.]), requires_grad=True)
 
-        self.templates = torch.nn.Parameter(self._template_nonlin(ts * 2), requires_grad=True)
+        self.templates = torch.nn.Parameter(ts * 2, requires_grad=True)
 
     def forward(self, poses, presences=None):
         """
@@ -180,7 +166,8 @@ class TemplateImageDecoder(nn.Module):
         # templates             shape             (self._n_caps, n_dims, self._template_size)
         # template_stack        shape (batch_size* self._n_caps, n_dims, self._template_size)
         # transformed_templates shape (batch_size, self._n_caps, n_dims, self._output_size)
-        template_stack = self.templates.repeat(batch_size, 1, 1, 1)   # TODO: see if auto broadcasting over batch dim works
+        templates = self._template_nonlin(self.templates)
+        template_stack = templates.repeat(batch_size, 1, 1, 1)   # TODO: see if auto broadcasting over batch dim works
         transformed_templates = nn.functional.grid_sample(template_stack, grid_coords).view(template_batch_shape)
 
         bg_value = torch.sigmoid(self.bg_value)
@@ -198,10 +185,13 @@ class TemplateImageDecoder(nn.Module):
             tt_rgb = transformed_templates
 
             temperature = F.softplus(self.temperature_logit + .5) + 1e-4
+            # TODO: why is this improper logit addition good for training?
             tt_logits = tt_rgb / temperature + math_utils.safe_log(presence_probs)
+            # tt_logits = -F.relu(-tt_logits)  # ensure logits are negative
+            # tt_logits = math_utils.safe_log(presence_probs).expand_as(tt_rgb)
             bg_logits = bg_image / temperature
 
-        bg_logits = bg_logits.expand(batch_size, 1, self._n_channels, *self._output_size)
+        bg_logits = bg_logits.expand(batch_size, 1, 1, *self._output_size)
         # TODO: add template colorization from features
 
         # mixture_logits shape (batch_size, self._n_caps + 1, self._n_channels, self._output_size)
@@ -211,7 +201,7 @@ class TemplateImageDecoder(nn.Module):
         mixture_pdf = math_utils.MixtureDistribution(mixture_logits, mixture_means)
 
         return EasyDict(
-            raw_templates=self.templates,
+            raw_templates=templates,
             mixture_means=mixture_means,
             mixture_logits=mixture_logits,
             pdf=mixture_pdf,

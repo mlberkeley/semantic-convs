@@ -1,0 +1,12 @@
+# Universal configs like logging, data directory, etc
+non_deterministic: False
+debug: False
+
+data_workers: 4
+
+log:
+  run_name: None
+  project: StackedCapsuleAutoEncoders
+  team: mlatberkeley
+  upload: True
+  frequency: 10

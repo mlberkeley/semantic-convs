@@ -52,6 +52,8 @@ class MAB(nn.Module):
         self.fc_q = nn.Linear(dim_Q, dim_V)
         self.fc_k = nn.Linear(dim_K, 40*dim_V)
         self.fc_v = nn.Linear(dim_K, 40*dim_V)
+        self.fc_k = nn.Linear(dim_K, dim_V)
+        self.fc_v = nn.Linear(dim_K, dim_V)
         if ln:
             self.ln0 = nn.LayerNorm(dim_V)
             self.ln1 = nn.LayerNorm(dim_V)
@@ -76,6 +78,10 @@ class MAB(nn.Module):
         K = torch.reshape(K, (128, 40, 128))
         V = torch.reshape(K, (128, 40, 128))
         
+        Q = self.fc_q(Q)
+        print(K.shape)
+        K, V = self.fc_k(K), self.fc_v(K)
+
         dim_split = self.dim_V // self.num_heads
         Q_ = torch.cat(Q.split(dim_split, 2), 0)
         K_ = torch.cat(K.split(dim_split, 2), 0)
@@ -109,7 +115,12 @@ class ISAB(nn.Module):
     def forward(self, X):
         H = self.mab0(self.I.repeat(X.size(0), 1, 1), X)
         return self.mab1(torch.flatten(X, start_dim=1), H)
+        self.mab0 = MAB(dim_out, dim_in, dim_out, num_heads, ln=ln)
+        self.mab1 = MAB(dim_in, dim_out, dim_out, num_heads, ln=ln)
 
+    def forward(self, X):
+        H = self.mab0(self.I.repeat(X.size(0), 1, 1), X)
+        return self.mab1(X, H)
 
 class PMA(nn.Module):
     def __init__(self, dim, num_heads, num_seeds, ln=False):
