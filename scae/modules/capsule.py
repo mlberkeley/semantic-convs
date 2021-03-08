@@ -13,18 +13,36 @@ from easydict import EasyDict
 class CapsuleLayer(nn.Module):
     _n_transform_params = 6
 
-    def __init__(self, input_dims, n_caps, n_caps_dims, n_votes, n_caps_params=None,
-                 n_hiddens=128, learn_vote_scale=False, deformations=True,
+    def __init__(self, input_dims, n_caps, n_caps_dims, n_votes,
+                 n_caps_params=32,
+                 n_hidden_dim=128, learn_vote_scale=False, deformations=True,
                  noise_type=None, noise_scale=0., similarity_transform=True,
                  caps_dropout_rate=0.0):
+        """Instantiates a set of capsules.
+
+
+        :param input_dims: The dimension of the input part (ie. a 2d point = 2)
+        :param n_caps: The number of capsules included in the layer.
+        :param n_caps_dims: The number of hidden layers in each capsule's MLP.
+        :param n_votes: How many part votes each capsule gets.
+        :param n_caps_params: Dimensionality of capsule feature vector.
+        :param n_hidden_dim: Dimensionality of capsule hidden layers.
+        :param learn_vote_scale:
+        :param deformations:
+        :param noise_type:
+        :param noise_scale:
+        :param similarity_transform:
+        :param caps_dropout_rate:
+
+        """
         super(CapsuleLayer, self).__init__()
+
         self.input_dims = input_dims  # last dimension of encoded feature
         self._n_caps = n_caps
         self._n_caps_dims = n_caps_dims
         self._n_caps_params = n_caps_params
 
         self._n_votes = n_votes
-        self._n_hiddens = n_hiddens
         self._learn_vote_scale = learn_vote_scale
         self._deformations = deformations
         self._noise_type = noise_type
@@ -50,8 +68,7 @@ class CapsuleLayer(nn.Module):
     def build(self):
 
         self.caps_mlp_design = []
-        shape_list = [self._n_caps_params+1, self._n_hiddens, self.n_outputs]
-        print(shape_list)
+        shape_list = [self._n_caps_params+1, self._n_caps_dims, self.n_outputs]
         for i in range(1, len(shape_list)):
             self.caps_mlp_design.append(nn.Linear(shape_list[i-1],
                                                   shape_list[i], bias=False))
@@ -78,11 +95,12 @@ class CapsuleLayer(nn.Module):
             [B, #capsules, 32]
 
         :returns:
-            :param vote:
+            :param vote: A matrix for each capsule's votes describing a part's pose.
                 [B, #capsules, #votes, #OV*OP matrix ie. (3, 3)]
-            :param scale:
+            :param scale: A std. dev. for each capsule's votes (for Gaussian
+            mixture component).
                 [B, #capsules, #votes]
-            :param vote_presence:
+            :param vote_presence: A probability representing confidence in vote.
                 [B, #capsules, #votes]
             :param pres_logit_per_caps:
                 [B, #capsules]
@@ -92,8 +110,11 @@ class CapsuleLayer(nn.Module):
                 [B, #capsules, #votes, 6]
             :param raw_caps_params:
                 [B, #capsules, 39]
-            :param raw_caps_features:
+            :param raw_caps_features: The feature vector representing a capsule
+            that is fed into the MLP.
                 [B, #capsules, 32]
+
+('pres_logit_per_caps', torch.Size([1, 3, 1])), ('pres_logit_per_vote', torch.Size([1, 3, 4])), ('dynamic_weights_l2', torch.Size([1, 3, 4, 6])), ('raw_caps_params', torch.Size([1, 3, 39])), ('raw_caps_features', torch.Size([1, 3, 32]))]
         """
 
         batch_size = x.shape[0]
@@ -109,8 +130,6 @@ class CapsuleLayer(nn.Module):
             pmf = D.bernoulli.Bernoulli(1. - self._caps_dropout_rate,
                                         dtype=torch.float32)
             caps_exist = pmf.sample(batch_shape + [1])
-
-        #
 
         caps_params = torch.cat([x, caps_exist], -1)
         split = torch.split(caps_params, 1, 1)
@@ -232,11 +251,11 @@ class OrderInvariantCapsuleLikelihood(nn.Module):
             [B, #parts, part_dim]
 
         :returns:
-            :param mixture_log_prob_per_batch: Summed across batch dimension
+            :param log_prob: Summed across batch dimension
                 [1]
             :param vote_presence:
                 [B, #capsules * #votes]
-            :param winning_vote: The vote, for each part, that maximizes
+            :param winner: The vote, for each part, that maximizes
                 likelihood.
                 [B, #parts, #part_dim]
             :param winning_pres: The presence associated with winning vote.
