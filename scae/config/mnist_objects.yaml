@@ -1,6 +1,6 @@
 # Experiment-set specific configs
 batch_size: 500
-num_epochs: 120
+num_epochs: 300
 
 model: pcae
 dataset: mnist_objects

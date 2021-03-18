@@ -18,8 +18,8 @@ class MNISTObjects(torch.utils.data.Dataset):
     NUM_CLASSES = 10
 
     def __init__(self, root='data', train=True,
-                 template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq',
-                 num_caps=4, new=True):
+                 template_run_path='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq',
+                 num_caps=4, new=False):
         self.train = train
         self.num_caps = num_caps
         self.file = pth.Path(root) / 'mnist_objects.pkl'
@@ -30,20 +30,18 @@ class MNISTObjects(torch.utils.data.Dataset):
         #     with open(self.file, 'wb') as f:
         #         self._generate(template_src)
         #         pickle.dump(self.data, f)
-        self._generate(template_src)
+        self._generate(template_run_path)
 
-    def _generate(self, template_src):
+    def _generate(self, template_run_path):
         with torch.no_grad():
             args = parse_args(f'--cfg scae/config/mnist.yaml --debug'.split(' '))
             args.pcae.num_caps = self.num_caps
             args.im_channels = 1
 
             pcae_decoder = TemplateImageDecoder(args).cuda()
-            if template_src is not None:
-                import wandb
-                from pytorch_lightning.utilities.cloud_io import load as pl_load
-                best_model = wandb.restore('last.ckpt', run_path=template_src, replace=True)
-                pcae_decoder.templates = torch.nn.Parameter(pl_load(best_model.name)['state_dict']['decoder.templates'].contiguous())
+            if template_run_path is not None:
+                from util.wandbapi import download_model
+                pcae_decoder.templates = torch.nn.Parameter(download_model(template_run_path)['state_dict']['decoder.templates'].contiguous())
 
 
             # Tensor of shape (batch_size, self._n_caps, 6)
@@ -76,6 +74,7 @@ class MNISTObjects(torch.utils.data.Dataset):
                 caps_poses=caps_poses,
                 sample_poses=sample_poses
             )
+            pass
 
     def rand_poses(self, shape, size_ratio):
         trans_xs = (torch.rand(shape).cuda() - .5) * 1
@@ -130,4 +129,4 @@ if __name__ == '__main__':
     # 8 Temp: mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd
     # 4 Temp: mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq
     # MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd', num_caps=8)
-    ds = MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)
+    ds = MNISTObjects(template_run_path='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)

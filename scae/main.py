@@ -141,6 +141,12 @@ def main():
         decoder = TemplateImageDecoder(args)
         model = PCAE(encoder, decoder, args)
 
+        from util.wandbapi import download_model
+        decoder.templates = torch.nn.Parameter(
+            download_model('mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq')['state_dict']['decoder.templates'].contiguous(),
+            requires_grad=False
+        )
+
         logger.watch(encoder._encoder, log='all', log_freq=args.log.frequency)
         logger.watch(decoder, log='all', log_freq=args.log.frequency)
     elif args.model == 'ocae':
