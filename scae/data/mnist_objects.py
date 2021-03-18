@@ -56,8 +56,10 @@ class MNISTObjects(torch.utils.data.Dataset):
             jitter_poses = self.rand_jitter_poses((MNISTObjects.NUM_SAMPLES, self.num_caps))
             jitter_poses = math_utils.geometric_transform(jitter_poses, similarity=True, inverse=True, as_matrix=True)
 
-            poses = jitter_poses\
-                    @ caps_poses.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1, 1, 1))\
+            # poses = jitter_poses\
+            #         @ caps_poses.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1, 1, 1))\
+            #         @ sample_poses.expand((MNISTObjects.NUM_SAMPLES, self.num_caps, -1, -1))
+            poses = caps_poses.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1, 1, 1)) \
                     @ sample_poses.expand((MNISTObjects.NUM_SAMPLES, self.num_caps, -1, -1))
             poses = poses[..., :2, :]
             poses = poses.reshape(*poses.shape[:-2], 6)
