@@ -57,9 +57,9 @@ class PCAE(pl.LightningModule):
         pose_labels, presence_labels = labels
 
         # Computation:
-        # capsules = self.encoder(img)
+        capsules = self.encoder(img)
 
-        rec = self.decoder(pose_labels, presence_labels)
+        rec = self.decoder(capsules.poses, presence_labels)
         rec_img = rec.pdf.mean()
 
         # Loss Calculations:
