@@ -74,7 +74,9 @@ class MNISTObjects(torch.utils.data.Dataset):
                 templates=pcae_decoder.templates,
                 jitter_poses=jitter_poses,
                 caps_poses=caps_poses,
-                sample_poses=sample_poses
+                sample_poses=sample_poses,
+                poses=poses,
+                presences=presences
             )
 
     def rand_poses(self, shape, size_ratio):
@@ -119,7 +121,7 @@ class MNISTObjects(torch.utils.data.Dataset):
         i_min = torch.min(image)
         image = torch.div(image - i_min, i_max - i_min + 1e-8)
 
-        return image, torch.zeros(1, dtype=torch.long)
+        return image, (self.data.poses[idx], self.data.presences[idx])
 
     def __len__(self):
         if self.train:
