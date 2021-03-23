@@ -59,7 +59,7 @@ class PCAE(pl.LightningModule):
         # Computation:
         capsules = self.encoder(img)
 
-        rec = self.decoder(capsules.poses, presence_labels)
+        rec = self.decoder(pose_labels, capsules.presences)
         rec_img = rec.pdf.mean()
 
         # Loss Calculations:
@@ -67,7 +67,7 @@ class PCAE(pl.LightningModule):
         temp_l1 = F.relu(self.decoder.templates).mean()
         rec_mse = self.mse(rec_img, img)
         pres_l2_sparsity_over_capsules, pres_l2_sparsity_over_batch =\
-            presence_l2_sparsity(presence_labels, num_classes=self.n_classes)
+            presence_l2_sparsity(capsules.presences, num_classes=self.n_classes)
 
         losses = EasyDict(
             rec_ll=rec_ll.detach(),
