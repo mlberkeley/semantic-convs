@@ -36,6 +36,5 @@ class CapsuleEncoder(nn.Module):
 
     def conformal_map(self, theta):
         cmap = torch.Tensor([[theta[3] * torch.cos(theta[2]), -1 * theta[3] * torch.sin(theta[2]), theta[0]],
-                            [theta[3] * torch.sin(theta[2]), theta[3] * torch.cos(theta[2]), theta[1]],
-                            [0, 0, 1]])
+                            [theta[3] * torch.sin(theta[2]), theta[3] * torch.cos(theta[2]), theta[1]]])
         return cmap
