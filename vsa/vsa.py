@@ -1,9 +1,8 @@
 import matplotlib.pyplot as plt
-import numpy as np
 
 import torch
 
-import notebooks.res_utils_frady
+import res_utils_numpy as ru_n
 import res_utils_torch as ru
 
 
@@ -47,7 +46,7 @@ class VSA:
 
 def ctvec(N, loop):
     # randomly samples complex vector for toroidal embedding with cycle of size "loop"
-    return torch.as_tensor(notebooks.res_utils_frady.cvecl(N, loop), dtype=torch.complex64)
+    return torch.as_tensor(ru_n.cvecl(N, loop), dtype=torch.complex64)
     # torch.exp(2j * np.pi * torch.randint(loop, (N,)) / loop)
 
 # with torch.no_grad():

@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
+# This is a translation from numpy to torch, numpy code was written by Edward Frady: http://epaxon.github.io/
 # TODO: Convert loops to torch
 
 def clip(img):

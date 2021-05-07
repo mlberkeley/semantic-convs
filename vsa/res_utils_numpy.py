@@ -7,13 +7,7 @@ import time
 import sklearn
 from sklearn.decomposition import PCA, FastICA, TruncatedSVD, NMF
 
-# import colormaps
-
-# plt.rcParams.update({'axes.titlesize': 'xx-large'})
-# plt.rcParams.update({'axes.labelsize': 'xx-large'})
-# plt.rcParams.update({'xtick.labelsize': 'x-large', 'ytick.labelsize': 'x-large'})
-# plt.rcParams.update({'legend.fontsize': 'x-large'})
-# plt.rcParams.update({'text.usetex': True})
+# Written and implemented by Edward Frady: http://epaxon.github.io/
 
 
 def clip(img):

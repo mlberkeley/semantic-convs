@@ -1,27 +1,10 @@
 import numpy as np
 from PIL import ImageFont
 import matplotlib.pyplot as plt
+from res_utils_numpy import *
 
 patch_size=[56, 56]
 
-def crvec(N, D=1):
-    rphase = 2 * np.pi * np.random.rand(D, N)
-    return np.cos(rphase) + 1.0j * np.sin(rphase)
-
-def roots(z, n):
-    nthRootOfr = np.abs(z) ** (1.0 / n)
-    t = np.angle(z)
-    return map(lambda k: nthRootOfr * np.exp((t + 2 * k * np.pi) * 1j / n), range(n))
-
-def cvecl(N, loopsize=None):
-    if loopsize is None:
-        loopsize = N
-
-    unity_roots = np.array(list(roots(1.0 + 0.0j, loopsize)))
-    root_idxs = np.random.randint(loopsize, size=N)
-    X1 = unity_roots[root_idxs]
-
-    return X1
 
 def encode_pix(im, Vt, Ht):
     N = Vt.shape[0]
@@ -60,6 +43,7 @@ def decode_pix(image_vec, Vt, Ht):
             im_r[m, n] = np.real(np.dot(np.conj(P_vec), image_vec) / N)
     return im_r
 
+
 def decode_pix_rgb(image_vec, Vt, Ht, Cv):
     N = Vt.shape[0]
     im_r = np.zeros(fim_size)
@@ -71,129 +55,6 @@ def decode_pix_rgb(image_vec, Vt, Ht, Cv):
                 im_r[m, n, c] = np.real(np.dot(np.conj(P_vec), image_vec) / N)
     return np.clip(im_r, 0, 1)
 
-def svd_whiten(X):
-    U, s, Vh = np.linalg.svd(X, full_matrices=False)
-    X_white = np.dot(U, Vh)
-    return X_white
-
-def resplot_im(coef_hists, nsteps=None, vals=None, labels=None, ticks=None, gt_labels=None):
-    alphis = []
-    for i in range(len(coef_hists)):
-        if nsteps is None:
-            alphis.append(np.argmax(np.abs(coef_hists[i][-1, :])))
-        else:
-            alphis.append(np.argmax(np.abs(coef_hists[i][nsteps, :])))
-    print(alphis)
-
-    rows = 1
-    columns = len(coef_hists)
-
-    fig = plt.gcf()
-    ax = columns * [0]
-
-    for j in range(columns):
-        ax[j] = fig.add_subplot(rows, columns, j + 1)
-        if nsteps is not None:
-            a = np.sign(coef_hists[j][nsteps, alphis[j]])
-            coef_hists[j] *= a
-
-            x_h = coef_hists[j][:nsteps, :]
-        else:
-            a = np.sign(coef_hists[j][-1, alphis[j]])
-            coef_hists[j] *= a
-
-            x_h = coef_hists[j][:, :]
-
-        imh = ax[j].imshow(x_h, interpolation='none', aspect='auto')#, cmap=colormaps.viridis)
-
-        if j == 0:
-            ax[j].set_ylabel('Iterations')
-        else:
-            ax[j].set_yticks([])
-
-        if labels is not None:
-            ax[j].set_title(labels[j][alphis[j]])
-            # ax[j].set_xlabel(labels[j][alphis[j]])
-
-            if ticks is not None:
-                ax[j].set_xticks(ticks[j])
-                ax[j].set_xticklabels(labels[j][ticks[j]])
-            else:
-                ax[j].set_xticks(np.arange(len(labels[j])))
-                ax[j].set_xticklabels(labels[j])
-
-        elif vals is not None:
-            dot_val = np.dot(x_h[-1, :], vals[j])
-            # ax[j].set_title(dot_val)
-            ax[j].set_xlabel(dot_val)
-
-            # ax.set_title(vals[j][alphis[j]])
-
-            if ticks is not None:
-                ax[j].set_xticks(ticks[j])
-                ax[j].set_xticklabels(vals[j][ticks])
-            else:
-                ax[j].set_xticklabels(vals[j])
-        else:
-            ax[j].set_title(alphis[j])
-            # ax[j].set_xlabel(alphis[j])
-
-        if gt_labels is not None:
-            # ax[j].set_xlabel(gt_labels[j])
-            ax[j].set_title(gt_labels[j])
-
-    # colorbar(imh, ticks=[])
-
-    plt.tight_layout()
-
-def res_decode_abs(bound_vec, vecs, max_steps=100, x_hi_init=None):
-    x_states = []
-    x_hists = []
-
-    for iD in range(len(vecs)):
-        N = vecs[iD].shape[1]
-        Dv = vecs[iD].shape[0]
-
-        if x_hi_init is None:
-            x_st = crvec(N, 1)
-            x_st = np.squeeze(x_st / np.abs(x_st))
-        else:
-            x_st = np.dot(vecs[iD].T, x_hi_init[iD])
-
-        x_states.append(x_st)
-
-        x_hi = np.zeros((max_steps, Dv))
-        x_hists.append(x_hi)
-
-    for i in range(max_steps):
-        th_vec = bound_vec.copy()
-        all_converged = np.zeros(len(vecs))
-        for iD in range(len(vecs)):
-            if i > 1:
-                xidx = np.argmax(np.abs(np.real(x_hists[iD][i - 1, :])))
-                x_states[iD] *= np.sign(x_hists[iD][i - 1, xidx])
-
-            th_vec *= np.conj(x_states[iD])
-
-        for iD in range(len(vecs)):
-            x_upd = th_vec / np.conj(x_states[iD])
-
-            x_upd = np.dot(vecs[iD].T, np.real(np.dot(np.conj(vecs[iD]), x_upd)))
-            # x_upd = np.dot(vecs[iD].T, np.dot(np.conj(vecs[iD]), x_upd))
-
-            # x_states[iD] = 0.9*(x_upd / np.abs(x_upd)) + 0.1*x_states[iD]
-            x_states[iD] = (x_upd / np.abs(x_upd))
-
-            x_hists[iD][i, :] = np.real(np.dot(np.conj(vecs[iD]), x_states[iD]))
-
-            if i > 1:
-                all_converged[iD] = np.allclose(x_hists[iD][i, :], x_hists[iD][i - 1, :], atol=5e-3, rtol=2e-2)
-
-        if np.all(all_converged):
-            print('converged:', i, )
-            break
-
-    return x_hists, i
 
 if __name__ == "__main__":
     font = ImageFont.truetype(u'/usr/share/fonts/opentype/mathjax/MathJax_Typewriter-Regular.otf', size=18)
