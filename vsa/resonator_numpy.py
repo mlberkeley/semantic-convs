@@ -187,8 +187,7 @@ def res_decode_abs(bound_vec, vecs, max_steps=100, x_hi_init=None):
             x_hists[iD][i, :] = np.real(np.dot(np.conj(vecs[iD]), x_states[iD]))
 
             if i > 1:
-                all_converged[iD] = np.allclose(x_hists[iD][i, :], x_hists[iD][i - 1, :],
-                                                atol=5e-3, rtol=2e-2)
+                all_converged[iD] = np.allclose(x_hists[iD][i, :], x_hists[iD][i - 1, :], atol=5e-3, rtol=2e-2)
 
         if np.all(all_converged):
             print('converged:', i, )

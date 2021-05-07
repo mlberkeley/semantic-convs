@@ -7,7 +7,7 @@ def gen_letter_images(patch_size = (56, 56)):
     from scae.util import vis
 
     font = ImageFont.truetype(u'/usr/share/fonts/opentype/mathjax/MathJax_Typewriter-Regular.otf', size=18)
-    letters = 'abcdefghijklmnopqrstuvwxyz'
+    letters = 'abcdefghijklmnopqrstuvwxyz'[:5]
     font_ims = []
 
     fim_size = (patch_size[0], patch_size[1], 3)

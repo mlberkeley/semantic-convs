@@ -2,20 +2,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import torch
+
+import notebooks.res_utils_frady
 import res_utils_torch as ru
 
 
 
 class VSA:
     def __init__(self, Vt, Ht, Cv, imshape, device="cuda"):
-        self.Vt = torch.as_tensor(Vt, dtype=torch.cfloat).to(device)
-        self.Ht = torch.as_tensor(Ht, dtype=torch.cfloat).to(device)
-        self.Cv = torch.as_tensor(Cv, dtype=torch.cfloat).to(device)
+        self.Vt = torch.as_tensor(Vt, dtype=torch.complex64).to(device)
+        self.Ht = torch.as_tensor(Ht, dtype=torch.complex64).to(device)
+        # self.Cv = torch.as_tensor(Cv, dtype=torch.complex128).to(device)
 
         # VSA vec length
-        self.V = self.Cv.shape[-1]
-        Hr = torch.range(0, imshape[0] - 1).to(device)[:, None, None, None].expand(imshape[0], 1, 1, self.V)
-        Vr = torch.range(0, imshape[1] - 1).to(device)[None, :, None, None].expand(1, imshape[1], 1, self.V)
+        self.V = self.Vt.shape[-1]
+        Hr = torch.arange(0, imshape[0]).to(device)[:, None, None, None].expand(imshape[0], 1, 1, self.V)
+        Vr = torch.arange(0, imshape[1]).to(device)[None, :, None, None].expand(1, imshape[1], 1, self.V)
 
         self.P_vec = self.Ht[None, None, None, :].expand(1, imshape[1], 1, self.V).pow(Hr) \
                      * self.Vt[None, None, None, :].expand(imshape[0], 1, 1, self.V).pow(Vr) \
@@ -36,7 +38,7 @@ class VSA:
 
     def decode_pix(self, image_vec):
         if not isinstance(image_vec, torch.Tensor):
-            image_vec = image_vec.as_tensor(image_vec, dtype=torch.cfloat).to(self.device)
+            image_vec = image_vec.as_tensor(image_vec, dtype=torch.complex64).to(self.device)
         image_vec = image_vec.to(self.device)
         # Selects pixel value by dotting VSA vec with conjugate of position encoding, and taking real component (clip for stability)
         # Old elementwise formula: return_img[m, n, c] = torch.real(torch.dot(torch.conj(self.P_vec[m, n, c]), image_vec) / self.R)
@@ -45,7 +47,8 @@ class VSA:
 
 def ctvec(N, loop):
     # randomly samples complex vector for toroidal embedding with cycle of size "loop"
-    return torch.exp(2j * np.pi * torch.randint(loop, (N,)) / loop)
+    return torch.as_tensor(notebooks.res_utils_frady.cvecl(N, loop), dtype=torch.complex64)
+    # torch.exp(2j * np.pi * torch.randint(loop, (N,)) / loop)
 
 # with torch.no_grad():
 #     vsa = VSA(Vt, Ht, Cv)

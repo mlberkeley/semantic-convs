@@ -7,13 +7,13 @@ import time
 import sklearn
 from sklearn.decomposition import PCA, FastICA, TruncatedSVD, NMF
 
-import colormaps
+# import colormaps
 
-plt.rcParams.update({'axes.titlesize': 'xx-large'})
-plt.rcParams.update({'axes.labelsize': 'xx-large'})
-plt.rcParams.update({'xtick.labelsize': 'x-large', 'ytick.labelsize': 'x-large'})
-plt.rcParams.update({'legend.fontsize': 'x-large'})
-plt.rcParams.update({'text.usetex': True})
+# plt.rcParams.update({'axes.titlesize': 'xx-large'})
+# plt.rcParams.update({'axes.labelsize': 'xx-large'})
+# plt.rcParams.update({'xtick.labelsize': 'x-large', 'ytick.labelsize': 'x-large'})
+# plt.rcParams.update({'legend.fontsize': 'x-large'})
+# plt.rcParams.update({'text.usetex': True})
 
 
 def clip(img):
@@ -440,7 +440,7 @@ def resplot_im(coef_hists, nsteps=None, vals=None, labels=None, ticks=None, gt_l
 
             x_h = coef_hists[j][:, :]
 
-        imh = ax[j].imshow(x_h, interpolation='none', aspect='auto', cmap=colormaps.viridis)
+        imh = ax[j].imshow(x_h, interpolation='none', aspect='auto')#, cmap=colormaps.viridis)
 
         if j == 0:
             ax[j].set_ylabel('Iterations')
