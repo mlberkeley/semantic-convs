@@ -34,8 +34,8 @@ class Resonator:
             N = self.attr_dicts[iD].shape[1]
             Dv = self.attr_dicts[iD].shape[0]
 
-            x_st = ru.cvec(N, 1).to(self.device)
-            x_st = x_st / torch.sqrt(torch.dot(torch.conj(x_st), x_st)) # Frobenius norm of complex vector
+            x_st = ru.cvec(N, 1).to(self.device).type(torch.complex128)
+            x_st = x_st / complex_abs(x_st)
             x_states.append(x_st)
 
             x_hi = torch.zeros((max_steps, Dv)).to(self.device)
@@ -49,8 +49,8 @@ class Resonator:
                 x_hists[iD][i, :] = torch.real(torch.conj(self.attr_dicts[iD]) @ x_states[iD])
                 # Update whether guess has changed
                 if i > 1:
-                    all_converged[iD] = torch.allclose(x_hists[iD][i, :], x_hists[iD][i - 1, :],
-                                                       atol=5e-3, rtol=2e-2)
+                    all_converged[iD] = torch.allclose(x_hists[iD][i, :], x_hists[iD][i - 1, :])
+                                                       #atol=5e-3, rtol=2e-2)
                 # Pick dict elem best matching guess
                 xidx = torch.argmax(torch.abs(x_hists[iD][i, :]))
                 x_states[iD] *= torch.sign(x_hists[iD][i, xidx])
@@ -59,9 +59,9 @@ class Resonator:
                 th_vec *= torch.conj(x_states[iD])
 
             # End if converged
-            if torch.all(all_converged):
-                print('converged:', i)
-                break
+            # if torch.all(all_converged):
+            #     print('converged:', i)
+            #     break
 
             for iD in range(len(self.attr_dicts)):
                 x_upd = bound_vec #th_vec / torch.conj(x_states[iD])
@@ -70,9 +70,9 @@ class Resonator:
                 mm.real = torch.zeros_like(mm.real)
                 x_upd = self.attr_dicts[iD].T @ mm
 
-                x_states[iD] = x_upd / complex_norm(x_upd)
+                x_states[iD] = x_upd / complex_abs(x_upd)
 
-            return x_hists, i
+        return x_hists, i
 
     def simple_decode(self, bound_vec, max_steps=100):
         last_guess_vecs = None
@@ -99,26 +99,32 @@ class Resonator:
         torch.conj(dicts_tensor) @ guess_vecs
 
 
-def complex_norm(vec):
-    return torch.sqrt(torch.dot(torch.conj(vec), vec).real)
+
+def complex_abs(vec):
+    """
+    Computes vector of norms for each complex number in input
+    :param vec:
+    :return:
+    """
+    return torch.sqrt(torch.conj(vec) * vec)
 
 
 def gen_pos_dicts(Vt, Ht, imshape):
-    Vt_span = torch.zeros((imshape[0], N), dtype=torch.cfloat)  # ru.crvec(N, Vspan)
-    Ht_span = torch.zeros((imshape[1], N), dtype=torch.cfloat)  # ru.crvec(N, Hspan)
+    Vt_span = torch.zeros((imshape[0], N), dtype=torch.complex128)  # ru.crvec(N, Vspan)
+    Ht_span = torch.zeros((imshape[1], N), dtype=torch.complex128)  # ru.crvec(N, Hspan)
 
     for i in range(imshape[0]):
-        Vt_span[i, :] = Vt ** i
+        Vt_span[i, :] = Vt ** (i - imshape[0] // 2)
 
     for i in range(imshape[1]):
-        Ht_span[i, :] = Ht ** i
+        Ht_span[i, :] = Ht ** (i - imshape[1] // 2)
 
-    return [Vt_span, Ht_span[0:1]]
+    return [Vt_span, Ht_span]
 
 def gen_image_vsa_vecs(letter_ims, vsa):
     reps = []
     for i, im in enumerate(letter_ims):
-        f_vec = vsa.encode_pix(im[..., 0:1])
+        f_vec = vsa.encode_pix(im)
         reps.append(f_vec)
     return torch.stack(reps).cuda()
 
@@ -136,7 +142,7 @@ if __name__ == "__main__":
     import time
 
 
-    N = int(3e3)
+    N = int(3e4)
     patch_size = (56, 56)
     # These are special base vectors for position that loop
     # Vt = ru.cvec(N)  # , font_ims[0].shape[0])
@@ -144,26 +150,44 @@ if __name__ == "__main__":
     Vt = ctvec(N, patch_size[1])
     Ht = ctvec(N, patch_size[0])
     # This is a set of 3 independently random complex phasor vectors for color
-    Cv = ru.crvec(N, 3)
+    # Cv = ru.crvec(N, 3)
     # Lv = ru.crvec(N, 26)
 
 
     with torch.no_grad():
-        vsa = VSA(Vt, Ht, Cv, patch_size, device='cuda')
+        vsa = VSA(Vt, Ht, None, patch_size, device='cuda')
 
-        letter_ims = gen_letter_images(patch_size)[..., 0:1]
+        letter_ims = gen_letter_images(patch_size)
         letter_dict = gen_image_vsa_vecs(letter_ims, vsa)
-        letter_ims_w = svd_whiten(letter_ims.reshape(26, -1)).reshape(letter_ims.shape)
+        letter_ims_w = svd_whiten(letter_ims.reshape(letter_ims.shape[0], -1)).reshape(letter_ims.shape)
         letter_dict_w = gen_image_vsa_vecs(letter_ims_w, vsa)
         # vis.plot_image_tensor(letter_ims_w.permute(0, 3, 1, 2))
 
         bound_vec = letter_dict[0] * vsa.Vt ** 5 #+ reps[1] + reps[2] * vsa.Ht ** 9 + reps[3] * vsa.Vt ** 9 * vsa.Ht ** 9
-        bound_vec /= complex_norm(bound_vec)
+        bound_vec /= complex_abs(bound_vec)
+
+        # im_idx1 = np.random.randint(len(letter_ims))
+        # tH = patch_size[1] * np.random.rand(1)
+        # tV = patch_size[0] * np.random.rand(1)
+        # # rC = np.random.randint(colors_arr.shape[0])
+        #
+        # t_im1 = letter_ims[im_idx1].numpy()
+        #
+        # # for i in range(t_im1.shape[2]):
+        # #     t_im1[:, :, i] = colors_arr[rC, i] * t_im1[:, :, i]
+        # from scipy.ndimage.interpolation import shift
+        # t_im1 = shift(t_im1, (tV, tH, 0), mode='wrap', order=1)
+        # t_im = np.clip(t_im1, 0, 1)
+        # plt.imshow(t_im)
+        # plt.show()
+        # bound_vec = vsa.encode_pix(t_im)
+
+
         # Show image information stored in vsa vec
         plt.imshow(vsa.decode_pix(bound_vec).cpu())
         plt.show()
 
-        attr_dicts = [letter_dict[0:1]] + gen_pos_dicts(vsa.Vt, vsa.Ht, patch_size)
+        attr_dicts = [letter_dict_w] + gen_pos_dicts(vsa.Vt, vsa.Ht, patch_size)
         res = Resonator(attr_dicts)
         tst = time.time()
 
@@ -174,7 +198,7 @@ if __name__ == "__main__":
         guess_vec = torch.ones_like(bound_vec, dtype=torch.cfloat).cuda()
         for attr_hist, attr_dict in zip(res_hist, attr_dicts):
             guess_vec *= attr_dict.cuda()[torch.argmax(attr_hist[nsteps])]
-        guess_vec /= complex_norm(guess_vec)
+        guess_vec /= complex_abs(guess_vec)
         # Show image information
         plt.imshow(vsa.decode_pix(guess_vec).cpu())
         plt.show()
