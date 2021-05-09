@@ -33,7 +33,13 @@ class VSA:
             im = im.permute(1, 2, 0)
         im = im.to(self.device)
         # Weighted sum of all P_vectors over pixels and channels (superposition of pixel values, embedded with P_vec)
-        return (self.P_vec.T * im.T).reshape(self.V, -1).sum(-1).T
+        if self.P_vec.shape[:2] == im.shape[:2]:
+            # input matches domain size
+            return (self.P_vec.T * im.T).reshape(self.V, -1).sum(-1).T
+        else:
+            # input smaller than domain size
+            v, h = im.shape[:2]
+            return (self.P_vec[:v, :h].T * im.T).reshape(self.V, -1).sum(-1).T
 
     def decode_pix(self, image_vec):
         if not isinstance(image_vec, torch.Tensor):

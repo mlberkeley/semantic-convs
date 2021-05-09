@@ -305,7 +305,18 @@ def get_output_conv(coef_hists, nsteps=None):
 
     return alphis, st
 
+def svd_whiten(X):
+    U, s, V = torch.svd(X.reshape(X.shape[0], -1), compute_uv=True)
+    # U and Vt are the singular matrices, and s contains the singular values.
+    # Since the rows of both U and Vt are orthonormal vectors, then U * Vt
+    # will be white
+    return (U @ V.T).reshape(X.shape)
 
+def complex_abs(vec):
+    """
+    Computes vector of norms for each complex number in input
+    """
+    return torch.sqrt(torch.conj(vec) * vec)
 
 # KEEP IN NUMPY
 def resplot_im(coef_hists, nsteps=None, vals=None, labels=None, ticks=None):

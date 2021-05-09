@@ -51,7 +51,9 @@ class MNISTObjects(torch.utils.data.Dataset):
                 from pytorch_lightning.utilities.cloud_io import load as pl_load
                 best_model = wandb.restore('last.ckpt', run_path=template_src, replace=True)
                 pcae_decoder.templates = torch.nn.Parameter(pl_load(best_model.name)['state_dict']['decoder.templates'].contiguous())
-            templates = pcae_decoder._template_nonlin(pcae_decoder.templates)
+            else:
+                return NotImplementedError("Dataset templates need to be fetched from wandb run")
+            self.templates = pcae_decoder._template_nonlin(pcae_decoder.templates)
 
             valid_part_poses = []
             valid_presences = []
@@ -66,7 +68,7 @@ class MNISTObjects(torch.utils.data.Dataset):
                 temp_poses = part_poses[..., :2, :]
                 temp_poses = temp_poses.reshape(*temp_poses.shape[:-2], 6)
 
-                transformed_templates = self.transform_templates(templates, temp_poses)
+                transformed_templates = self.transform_templates(self.templates, temp_poses)
                 metric = self.overlap_metric(transformed_templates, presences)
                 metric = metric * (presences.bool().unsqueeze(-1) | presences.bool().unsqueeze(-2)).float()
 
@@ -104,7 +106,7 @@ class MNISTObjects(torch.utils.data.Dataset):
                 rec = pcae_decoder(poses, presences)
                 images = rec.pdf.mean()
             elif self.template_mixing == 'max':
-                transformed_templates = self.transform_templates(templates, poses)
+                transformed_templates = self.transform_templates(self.templates, poses)
                 # templates = templates.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1))
                 images = (transformed_templates.T * presences.T).T.max(dim=1)[0]
             else:
