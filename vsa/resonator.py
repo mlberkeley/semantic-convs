@@ -3,6 +3,7 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
+from scipy.ndimage.interpolation import shift
 
 from vsa import VSA, ctvec
 
@@ -105,23 +106,27 @@ if __name__ == "__main__":
     # dataset = "letters"
     dataset = "mnist_objects"
     run_numpy = False
+    num_templates = 3
 
     N = int(3e4)
     if dataset == "letters":
-        template_size = (56, 56)
-        image_size = (56, 56)
         template_centered = True
         from letters import gen_letter_images
-        template_ims = gen_letter_images(template_size)
-    elif dataset == "mnist_objects":
-        template_size = (11, 11)
+        template_ims = gen_letter_images()
+
+        template_size = template_ims[0].shape[1:]
         image_size = (40, 40)
+    elif dataset == "mnist_objects":
+
         template_centered = True
         # from torch.utils.data import DataLoader
         from scae.data.mnist_objects import MNISTObjects
         dataset = MNISTObjects(train=True)
         # dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
         template_ims = dataset.templates
+
+        template_size = template_ims[0].shape[1:]
+        image_size = (40, 40)
     else:
         raise NotImplementedError(f"No dataset {dataset}")
 
@@ -153,72 +158,76 @@ if __name__ == "__main__":
         # Evaluation Loop
         batch_outs = []
         res_total_time = 0.
-        num_batches = 20
+        num_batches = 10
         for i in range(num_batches):
+            # Datapoint generation
             # bound_vec = letter_dict[0] * vsa.Vt ** 5 #+ reps[1] + reps[2] * vsa.Ht ** 9 + reps[3] * vsa.Vt ** 9 * vsa.Ht ** 9
-            # bound_vec /= complex_abs(bound_vec)
-            pad_amt = [0, image_size[0] - template_size[0], 0, image_size[1] - template_size[1]]
 
-            im_idx1 = np.random.randint(len(template_ims))
-            tH = pad_amt[1] * np.random.rand(1)
-            tV = pad_amt[3] * np.random.rand(1)
-            # rC = np.random.randint(colors_arr.shape[0])
-            t_im1 = F.pad(template_ims[im_idx1], pad_amt).cpu().numpy()
+            pad_amt = [0, image_size[1] - template_size[1], 0, image_size[0] - template_size[0]]
+            target_image = np.zeros(image_size)[None, ...]
+            for t in range(num_templates):
+                template_idx = np.random.randint(len(template_ims))
+                tH = pad_amt[3] * np.random.rand(1)
+                tV = pad_amt[1] * np.random.rand(1)
+                # rC = np.random.randint(colors_arr.shape[0])
+                template = F.pad(template_ims[template_idx], pad_amt).cpu().numpy()
 
-            # for i in range(t_im1.shape[2]):
-            #     t_im1[:, :, i] = colors_arr[rC, i] * t_im1[:, :, i]
-            from scipy.ndimage.interpolation import shift
-            t_im1 = shift(t_im1, (tV, tH, 0), mode='wrap', order=1)
-            t_im = np.clip(t_im1, 0, 1)
-            bound_vec = vsa.encode_pix(t_im)
+                # for i in range(t_im1.shape[2]):
+                #     t_im1[:, :, i] = colors_arr[rC, i] * t_im1[:, :, i]
+                template = shift(template, (0, tV, tH), mode='wrap', order=1)
+                target_image += template
+            target_image = np.clip(target_image, 0, 1)
 
-            if run_numpy:
-                # Run numpy resonator implementation
-                import resonator_numpy as rn
+            # TODO: end on high cossim or or low residual (bound_vec, guess_vec)
+            bound_vecs = [vsa.encode_pix(target_image)]
+            guess_agg_vecs = []
+            for t in range(num_templates):
+                # Run torch resonator implementation
                 tst = time.time()
-                res_hist_np, nsteps_np = rn.res_decode_abs(bound_vec.cpu().numpy(),
-                                                           [a.cpu().numpy() for a in res_attr_dicts], 200)
-                res_hist_np = [torch.as_tensor(r) for r in res_hist_np]
-                print(f"numpy resonator took {time.time() - tst}s")
+                res_hist, nsteps = res.decode(bound_vecs[-1], 200)
+                res_total_time += time.time() - tst
 
                 # Plot convergence dynamics
-                plt.figure(figsize=(8, 3))
-                ru.resplot_im([h.cpu() for h in res_hist_np], nsteps)  # , labels=res_xlabels, ticks=res_xticks)
-                plt.tight_layout()
-                plt.show()
+                # plt.figure(figsize=(8, 3))
+                # ru.resplot_im([h.cpu() for h in res_hist], nsteps)  # , labels=res_xlabels, ticks=res_xticks)
+                # plt.tight_layout()
+                # plt.show()
 
-            # Run torch resonator implementation
-            tst = time.time()
-            res_hist, nsteps = res.decode(bound_vec, 200)
-            res_total_time += time.time() - tst
+                # Compute best guess vsa vec
+                guess_vec = torch.ones_like(bound_vecs[-1], dtype=torch.complex64).cuda()
+                for attr_hist, attr_dict in zip(res_hist, gt_attr_dicts):
+                    guess_vec *= attr_dict.cuda()[torch.argmax(attr_hist[nsteps])]
+                guess_agg_vecs.append(guess_agg_vecs[-1] + guess_vec if len(guess_agg_vecs) > 0 else guess_vec)
 
-            # Plot convergence dynamics
-            # plt.figure(figsize=(8, 3))
-            # ru.resplot_im([h.cpu() for h in res_hist], nsteps)  # , labels=res_xlabels, ticks=res_xticks)
-            # plt.tight_layout()
-            # plt.show()
-
-            # Compute best guess vsa vec
-            guess_vec = torch.ones_like(bound_vec, dtype=torch.complex64).cuda()
-            for attr_hist, attr_dict in zip(res_hist, gt_attr_dicts):
-                guess_vec *= attr_dict.cuda()[torch.argmax(attr_hist[nsteps])]
+                residual_vec = bound_vecs[-1] - guess_vec
+                bound_vecs.append(residual_vec)
 
             # Show input image, image decoded from vsa vec (encoded img), and image decoded from guess vec
+            target_image_row = [vsa.decode_pix(b_vec).permute(2, 0, 1).cpu() for b_vec in bound_vecs]
+            guess_image_row = [vsa.decode_pix(g_vec).permute(2, 0, 1).cpu() for g_vec in guess_agg_vecs]
+            # Compute and add diff image between input and recon
+
+            # Append grid
             batch_outs.append(
-                torch.stack([
-                    torch.as_tensor(t_im),
-                    # vsa.decode_pix(bound_vec).permute(2, 0, 1).cpu(),
-                    vsa.decode_pix(guess_vec).permute(2, 0, 1).cpu()
-                ], dim=0)
+                torch.stack(
+                    target_image_row
+                    + guess_image_row
+                    + [torch.abs(target_image_row[0] - guess_image_row[-1])],
+                    dim=0)
             )
 
-        print(f"torch resonator took avg of {res_total_time / num_batches}s")
+        print(f"torch resonator took avg of {res_total_time / num_batches}s per decode")
+        sims = torch.as_tensor(
+            [bo[-1].sum().item() for bo in batch_outs]
+        ) # L1 reconstruction diff (sum over all pixels over difference image)
+        batch_outs = torch.stack(batch_outs, dim=0)
+        _, indices = torch.sort(sims, descending=True)
+
         vis.plot_image_tensor_2D(
-            torch.stack(batch_outs, dim=0), # shape = rows, columns, image
-            titles=[
-                "Input\nimage",
-                # "Encoded\nimage",
-                "Decoded\nimage"
-            ]
+            batch_outs[indices], # shape = rows, columns, image
+            titles=["Target"]
+                   + [f"{i} Out" for i in range(1, num_templates+1)]
+                   + [f"{i} In" for i in range(1, num_templates+1)]
+                   + ["Error"]
         )
         pass
