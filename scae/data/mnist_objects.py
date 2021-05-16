@@ -17,15 +17,15 @@ import scae.util.math as math_utils
 from scae.util.vis import plot_image_tensor_2D, plot_image_tensor
 
 class MNISTObjects(torch.utils.data.Dataset):
-    NUM_SAMPLES = 10000
     NUM_CLASSES = 10
 
     def __init__(self, root='data', train=True,
                  template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq',
-                 num_caps=4, new=True, aligned=True, template_mixing='pdf'):
+                 num_caps=4, new=True, aligned=True, template_mixing='pdf', size=10000):
         self.train = train
         self.num_caps = num_caps
         self.file = pth.Path(root) / 'mnist_objects.pkl'
+        self.size = size
         # if self.file.exists() and not new:
         #     with open(self.file, 'rb') as f:
         #         self.data = pickle.load(f)
@@ -88,26 +88,26 @@ class MNISTObjects(torch.utils.data.Dataset):
             # plot_image_tensor((transformed_templates.T * presences.T).T.max(dim=1)[0])
 
             # Tensor of shape (batch_size, self._n_caps, 6)
-            object_poses = self.rand_poses((MNISTObjects.NUM_SAMPLES, 1), size_ratio=6)
+            object_poses = self.rand_poses((self.size, 1), size_ratio=6)
             object_poses = math_utils.geometric_transform(object_poses, similarity=True, inverse=True, as_matrix=True)
 
-            jitter_poses = self.rand_jitter_poses((MNISTObjects.NUM_SAMPLES, self.num_caps))
+            jitter_poses = self.rand_jitter_poses((self.size, self.num_caps))
             jitter_poses = math_utils.geometric_transform(jitter_poses, similarity=True, inverse=True, as_matrix=True)
 
             poses = jitter_poses\
-                    @ part_poses.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1, 1, 1))\
-                    @ object_poses.expand((MNISTObjects.NUM_SAMPLES, self.num_caps, -1, -1))
+                    @ part_poses.repeat((self.size // MNISTObjects.NUM_CLASSES, 1, 1, 1))\
+                    @ object_poses.expand((self.size, self.num_caps, -1, -1))
             poses = poses[..., :2, :]
             poses = poses.reshape(*poses.shape[:-2], 6)
 
-            presences = presences.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1))
+            presences = presences.repeat((self.size // MNISTObjects.NUM_CLASSES, 1))
 
             if self.template_mixing == 'pdf':
                 rec = pcae_decoder(poses, presences)
                 images = rec.pdf.mean()
             elif self.template_mixing == 'max':
                 transformed_templates = self.transform_templates(self.templates, poses)
-                # templates = templates.repeat((MNISTObjects.NUM_SAMPLES // MNISTObjects.NUM_CLASSES, 1))
+                # templates = templates.repeat((self.size // MNISTObjects.NUM_CLASSES, 1))
                 images = (transformed_templates.T * presences.T).T.max(dim=1)[0]
             else:
                 raise ValueError(f'Invalid template_mixing value {self.template_mixing}')
@@ -175,7 +175,7 @@ class MNISTObjects(torch.utils.data.Dataset):
         if self.train:
             idx = item
         else:
-            idx = MNISTObjects.NUM_SAMPLES * 4 // 5 + item
+            idx = self.size * 4 // 5 + item
         image = self.data.images[idx]
 
         image = self.norm_img(image)
@@ -205,11 +205,12 @@ class MNISTObjects(torch.utils.data.Dataset):
 
     def __len__(self):
         if self.train:
-            return MNISTObjects.NUM_SAMPLES * 4 // 5
-        return MNISTObjects.NUM_SAMPLES // 5
+            return self.size * 4 // 5
+        return self.size // 5
 
 if __name__ == '__main__':
     # 8 Temp: mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd
     # 4 Temp: mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq
     # MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd', num_caps=8)
     ds = MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)
+    ds.plot()

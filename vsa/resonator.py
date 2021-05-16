@@ -3,6 +3,7 @@ import numpy as np
 
 import torch
 import torch.nn.functional as F
+import torchshow as ts
 from scipy.ndimage.interpolation import shift
 
 from vsa import VSA, ctvec
@@ -14,7 +15,6 @@ class Resonator:
         self.attr_dicts = [d.to(device) for d in attr_dicts]
         self.device = device
 
-    # TODO: update with Paxton Frady's more recent resonator algorithm
     """
     TODO: visualization functionality
       - Image-space visualization (overlay view-deformation grid)
@@ -29,8 +29,16 @@ class Resonator:
     TODO: 
     """
     def decode(self, bound_vec, max_steps=100):
+        """
+
+        x_states:
+        x_hist: array of all activations
+        :param bound_vec:
+        :param max_steps:
+        :return:
+        """
         x_states = []
-        x_hists = []
+        x_hist = []
 
         for iD in range(len(self.attr_dicts)):
             N = self.attr_dicts[iD].shape[1]
@@ -41,15 +49,15 @@ class Resonator:
             x_states.append(x_st)
 
             x_hi = torch.zeros((max_steps, Dv)).to(self.device)
-            x_hists.append(x_hi)
+            x_hist.append(x_hi)
 
         for i in range(max_steps):
             th_vec = bound_vec.clone()
             all_converged = torch.zeros(len(self.attr_dicts), dtype=torch.bool)
             for iD in range(len(self.attr_dicts)):
                 if i > 1:
-                    xidx = torch.argmax(torch.abs(x_hists[iD][i - 1, :]))
-                    x_states[iD] *= torch.sign(x_hists[iD][i - 1, xidx])
+                    xidx = torch.argmax(torch.abs(x_hist[iD][i - 1, :]))
+                    x_states[iD] *= torch.sign(x_hist[iD][i - 1, xidx])
 
                 th_vec *= torch.conj(x_states[iD])
 
@@ -62,10 +70,67 @@ class Resonator:
 
                 x_states[iD] = x_upd / ru.complex_abs(x_upd)
 
-                x_hists[iD][i, :] = torch.real(torch.conj(self.attr_dicts[iD]) @ x_states[iD])
+                x_hist[iD][i, :] = torch.real(torch.conj(self.attr_dicts[iD]) @ x_states[iD])
 
                 if i > 1:
-                    all_converged[iD] = torch.allclose(x_hists[iD][i, :], x_hists[iD][i - 1, :], atol=5e-3, rtol=2e-2)
+                    all_converged[iD] = torch.allclose(x_hist[iD][i, :], x_hist[iD][i - 1, :], atol=5e-3, rtol=2e-2)
+
+            # End if converged
+            if torch.all(all_converged):
+                # print('converged:', i)
+                break
+
+        return x_hist, i
+
+    def multi_decode(self, bound_vec, n_templates, max_steps=100):
+        N = self.attr_dicts[0].shape[1]
+        x_statess = []
+        x_hists = []
+        for iT in range(n_templates):
+            x_states = []
+            x_hist = []
+            for iD in range(len(self.attr_dicts)):
+                Dv = self.attr_dicts[iD].shape[0]
+
+                x_st = ru.cvec(N, 1).to(self.device).type(torch.complex64)
+                x_st = x_st / ru.complex_abs(x_st)
+                x_states.append(x_st)
+
+                x_hi = torch.zeros((max_steps, Dv)).to(self.device)
+                x_hist.append(x_hi)
+            x_statess.append(x_states)
+            x_hists.append(x_hist)
+
+        for i in range(max_steps):
+            th_vec = bound_vec.clone()
+            template_guesses = torch.ones(n_templates, N).to(self.device).type(torch.complex64)
+            all_converged = torch.zeros((n_templates, len(self.attr_dicts)), dtype=torch.bool)
+            for iT in range(n_templates):
+                for iD in range(len(self.attr_dicts)):
+                    if i > 1:
+                        xidx = torch.argmax(torch.abs(x_hists[iT][iD][i - 1, :]))
+                        x_statess[iT][iD] *= torch.sign(x_hists[iT][iD][i - 1, xidx])
+
+                    template_guesses[iT] *= torch.conj(x_statess[iT][iD])
+                th_vec -= template_guesses[iT]
+
+            # th_vec - residual
+
+            for iT in range(n_templates):
+                for iD in range(len(self.attr_dicts)):
+                    # x_upd = (th_vec + template_guesses[iT]) / torch.conj(x_statess[iT][iD])
+                    x_upd = th_vec + x_statess[iT][iD]
+
+                    mm = (torch.conj(self.attr_dicts[iD]) @ x_upd)
+                    mm.imag = torch.zeros_like(mm.imag)
+                    x_upd = self.attr_dicts[iD].T @ mm
+
+                    x_statess[iT][iD] = x_upd / ru.complex_abs(x_upd)
+
+                    x_hists[iT][iD][i, :] = torch.real(torch.conj(self.attr_dicts[iD]) @ x_statess[iT][iD])
+
+                    if i > 1:
+                        all_converged[iT][iD] = torch.allclose(x_hists[iT][iD][i, :], x_hists[iT][iD][i - 1, :], atol=5e-3, rtol=2e-2)
 
             # End if converged
             if torch.all(all_converged):
@@ -99,14 +164,18 @@ def gen_image_vsa_vecs(letter_ims, vsa):
 
 
 if __name__ == "__main__":
-
     from scae.util import vis
     import time
 
     # dataset = "letters"
     dataset = "mnist_objects"
+    decode = "greedy"
+    # decode = "multi"
+    # resplots = True
+    resplots = False
     run_numpy = False
-    num_templates = 3
+    num_templates = 2
+    num_batches = 2
 
     N = int(3e4)
     if dataset == "letters":
@@ -117,7 +186,6 @@ if __name__ == "__main__":
         template_size = template_ims[0].shape[1:]
         image_size = (40, 40)
     elif dataset == "mnist_objects":
-
         template_centered = True
         # from torch.utils.data import DataLoader
         from scae.data.mnist_objects import MNISTObjects
@@ -158,7 +226,6 @@ if __name__ == "__main__":
         # Evaluation Loop
         batch_outs = []
         res_total_time = 0.
-        num_batches = 10
         for i in range(num_batches):
             # Datapoint generation
             # bound_vec = letter_dict[0] * vsa.Vt ** 5 #+ reps[1] + reps[2] * vsa.Ht ** 9 + reps[3] * vsa.Vt ** 9 * vsa.Ht ** 9
@@ -180,31 +247,54 @@ if __name__ == "__main__":
 
             # TODO: end on high cossim or or low residual (bound_vec, guess_vec)
             bound_vecs = [vsa.encode_pix(target_image)]
-            guess_agg_vecs = []
-            for t in range(num_templates):
+            guess_vecs = []
+            if decode == "greedy":
+                for t in range(num_templates):
+                    # Run torch resonator implementation
+                    tst = time.time()
+                    res_hist, nsteps = res.decode(bound_vecs[-1], 200)
+                    res_total_time += time.time() - tst
+
+                    # Plot convergence dynamics
+                    if resplots:
+                        plt.figure(figsize=(8, 3))
+                        ru.resplot_im([h.cpu() for h in res_hist], nsteps)  # , labels=res_xlabels, ticks=res_xticks)
+                        plt.tight_layout()
+                        plt.show()
+
+                    # Compute best guess vsa vec
+                    guess_vec = torch.ones_like(bound_vecs[-1], dtype=torch.complex64).cuda()
+                    for attr_hist, attr_dict in zip(res_hist, gt_attr_dicts):
+                        guess_vec *= attr_dict.cuda()[torch.argmax(attr_hist[nsteps])]
+                    guess_vecs.append(guess_vecs[-1] + guess_vec if len(guess_vecs) > 0 else guess_vec)
+
+                    residual_vec = bound_vecs[-1] - guess_vec
+                    bound_vecs.append(residual_vec)
+            elif decode == "multi":
                 # Run torch resonator implementation
                 tst = time.time()
-                res_hist, nsteps = res.decode(bound_vecs[-1], 200)
+                res_hists, nsteps = res.multi_decode(bound_vecs[-1], n_templates=num_templates, max_steps=200)
                 res_total_time += time.time() - tst
 
-                # Plot convergence dynamics
-                # plt.figure(figsize=(8, 3))
-                # ru.resplot_im([h.cpu() for h in res_hist], nsteps)  # , labels=res_xlabels, ticks=res_xticks)
-                # plt.tight_layout()
-                # plt.show()
-
                 # Compute best guess vsa vec
-                guess_vec = torch.ones_like(bound_vecs[-1], dtype=torch.complex64).cuda()
-                for attr_hist, attr_dict in zip(res_hist, gt_attr_dicts):
-                    guess_vec *= attr_dict.cuda()[torch.argmax(attr_hist[nsteps])]
-                guess_agg_vecs.append(guess_agg_vecs[-1] + guess_vec if len(guess_agg_vecs) > 0 else guess_vec)
+                for res_hist in res_hists:
+                    if resplots:
+                        plt.figure(figsize=(8, 3))
+                        ru.resplot_im([h.cpu() for h in res_hist], nsteps)  # , labels=res_xlabels, ticks=res_xticks)
+                        plt.tight_layout()
+                        plt.show()
 
-                residual_vec = bound_vecs[-1] - guess_vec
-                bound_vecs.append(residual_vec)
+                    guess_vec = torch.ones_like(bound_vecs[-1], dtype=torch.complex64).cuda()
+                    for attr_hist, attr_dict in zip(res_hist, gt_attr_dicts):
+                        guess_vec *= attr_dict.cuda()[torch.argmax(attr_hist[nsteps])]
+                    guess_vecs.append(guess_vec if len(guess_vecs) > 0 else guess_vec)
+                guess_vecs.append(sum(guess_vecs))
+            else:
+                raise NotImplementedError(f"Invalid decode mode {decode}")
 
             # Show input image, image decoded from vsa vec (encoded img), and image decoded from guess vec
             target_image_row = [vsa.decode_pix(b_vec).permute(2, 0, 1).cpu() for b_vec in bound_vecs]
-            guess_image_row = [vsa.decode_pix(g_vec).permute(2, 0, 1).cpu() for g_vec in guess_agg_vecs]
+            guess_image_row = [vsa.decode_pix(g_vec).permute(2, 0, 1).cpu() for g_vec in guess_vecs]
             # Compute and add diff image between input and recon
 
             # Append grid
@@ -225,9 +315,9 @@ if __name__ == "__main__":
 
         vis.plot_image_tensor_2D(
             batch_outs[indices], # shape = rows, columns, image
-            titles=["Target"]
-                   + [f"{i} Out" for i in range(1, num_templates+1)]
-                   + [f"{i} In" for i in range(1, num_templates+1)]
-                   + ["Error"]
+            # titles=["Target"]
+            #        + [f"{i} Out" for i in range(1, num_templates+1)]
+            #        + [f"{i} In" for i in range(1, num_templates+1)]
+            #        + ["Error"]
         )
         pass

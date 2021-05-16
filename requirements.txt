@@ -57,3 +57,4 @@ urllib3==1.26.2
 wandb==0.10.12
 watchdog==1.0.2
 Werkzeug==1.0.1
+torchshow
