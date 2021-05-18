@@ -155,7 +155,7 @@ def main():
     else:
         raise NotImplementedError()
 
-    #
+    # dataset.log_to_wandb_run(wandb.run)
     if 'mnist' in args.dataset and 'objects' in args.dataset:
         wandb.log({"dataset_templates": [wandb.Image(i.detach().cpu().numpy(), caption="Label") for i in dataset.data.templates]})
         wandb.log({"dataset_images": [wandb.Image(i.detach().cpu().numpy(), caption="Label") for i in dataset.data.images[:50]]})

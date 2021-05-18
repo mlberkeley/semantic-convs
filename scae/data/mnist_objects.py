@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pathlib as pth
+
+import wandb
 from torchvision.datasets import CIFAR10, MNIST, QMNIST, USPS
 from torchvision import transforms
 import torch
@@ -13,8 +15,10 @@ from easydict import EasyDict
 from scae.models.pcae import PCAE
 from scae.modules.part_capsule_ae import TemplateImageDecoder
 from scae.args import parse_args
+
 import scae.util.math as math_utils
 from scae.util.vis import plot_image_tensor_2D, plot_image_tensor
+from scae.util.wandb import to_wandb_im
 
 class MNISTObjects(torch.utils.data.Dataset):
     NUM_CLASSES = 10
@@ -55,70 +59,62 @@ class MNISTObjects(torch.utils.data.Dataset):
                 return NotImplementedError("Dataset templates need to be fetched from wandb run")
             self.templates = pcae_decoder._template_nonlin(pcae_decoder.templates)
 
-            valid_part_poses = []
-            valid_presences = []
-            while len(valid_part_poses) < MNISTObjects.NUM_CLASSES:
-                presences_shape = (MNISTObjects.NUM_CLASSES, self.num_caps)
-                presences = Bernoulli(.99).sample(presences_shape).float().cuda()
+            def generate_valid_part_object_relations(num_objects=MNISTObjects.NUM_CLASSES, num_capsules=self.num_caps):
+                valid_part_poses = []
+                valid_presences = []
+                while len(valid_part_poses) < num_objects:
+                    presences_shape = (num_objects, self.num_caps)
+                    presences = Bernoulli(.99).sample(presences_shape).float().cuda()
 
-                part_poses = self.rand_poses((MNISTObjects.NUM_CLASSES, self.num_caps),
-                                             size_ratio=args.pcae.decoder.template_size[0] / args.pcae.decoder.output_size[0] / 2)
-                part_poses = math_utils.geometric_transform(part_poses, similarity=True, inverse=True, as_matrix=True)
+                    part_poses = self.rand_poses((num_objects, num_capsules),
+                                                 size_ratio=args.pcae.decoder.template_size[0] / args.pcae.decoder.output_size[0] / 2)
+                    part_poses = math_utils.geometric_transform(part_poses, similarity=True, inverse=True, as_matrix=True)
 
-                temp_poses = part_poses[..., :2, :]
-                temp_poses = temp_poses.reshape(*temp_poses.shape[:-2], 6)
+                    transformed_templates = self.transform_templates(self.templates, part_poses)
+                    metric = self.overlap_metric(transformed_templates, presences)
+                    metric = metric * (presences.bool().unsqueeze(-1) | presences.bool().unsqueeze(-2)).float()
 
-                transformed_templates = self.transform_templates(self.templates, temp_poses)
-                metric = self.overlap_metric(transformed_templates, presences)
-                metric = metric * (presences.bool().unsqueeze(-1) | presences.bool().unsqueeze(-2)).float()
+                    for i in range(MNISTObjects.NUM_CLASSES):
+                        if ((metric[i] == 0) | ((10 < metric[i]) & (metric[i] < 20))).all()\
+                                and (metric[i] > 0).any():
+                            valid_part_poses.append(part_poses[i])
+                            valid_presences.append(presences[i])
 
-                for i in range(MNISTObjects.NUM_CLASSES):
-                    if ((metric[i] == 0) | ((10 < metric[i]) & (metric[i] < 20))).all()\
-                            and (metric[i] > 0).any():
-                        valid_part_poses.append(part_poses[i])
-                        valid_presences.append(presences[i])
+                valid_part_poses = torch.stack(valid_part_poses[:MNISTObjects.NUM_CLASSES])
+                valid_presences = torch.stack(valid_presences[:MNISTObjects.NUM_CLASSES])
+                return valid_part_poses, valid_presences
 
-            part_poses = torch.stack(valid_part_poses[:MNISTObjects.NUM_CLASSES])
-            presences = torch.stack(valid_presences[:MNISTObjects.NUM_CLASSES])
+            self.part_poses, self.presences = generate_valid_part_object_relations()
 
             # Vis final objects
-            # temp_poses = part_poses[..., :2, :]
-            # temp_poses = temp_poses.reshape(*temp_poses.shape[:-2], 6)
-            # transformed_templates = self.transform_templates(templates, temp_poses)
-            # plot_image_tensor((transformed_templates.T * presences.T).T.max(dim=1)[0])
+            transformed_templates = self.transform_templates(self.templates, self.part_poses)
+            self.objects = (transformed_templates.T * self.presences.T).T
 
             # Tensor of shape (batch_size, self._n_caps, 6)
             object_poses = self.rand_poses((self.size, 1), size_ratio=6)
-            object_poses = math_utils.geometric_transform(object_poses, similarity=True, inverse=True, as_matrix=True)
+            self.object_poses = math_utils.geometric_transform(object_poses, similarity=True, inverse=True, as_matrix=True)
 
             jitter_poses = self.rand_jitter_poses((self.size, self.num_caps))
-            jitter_poses = math_utils.geometric_transform(jitter_poses, similarity=True, inverse=True, as_matrix=True)
+            self.jitter_poses = math_utils.geometric_transform(jitter_poses, similarity=True, inverse=True, as_matrix=True)
 
-            poses = jitter_poses\
-                    @ part_poses.repeat((self.size // MNISTObjects.NUM_CLASSES, 1, 1, 1))\
-                    @ object_poses.expand((self.size, self.num_caps, -1, -1))
-            poses = poses[..., :2, :]
-            poses = poses.reshape(*poses.shape[:-2], 6)
+            self.poses = self.jitter_poses\
+                         @ self.part_poses.repeat((self.size // MNISTObjects.NUM_CLASSES, 1, 1, 1))\
+                         @ self.object_poses.expand((self.size, self.num_caps, -1, -1))
 
-            presences = presences.repeat((self.size // MNISTObjects.NUM_CLASSES, 1))
+            presences = self.presences.repeat((self.size // MNISTObjects.NUM_CLASSES, 1))
+
+            labels = torch.arange(0, MNISTObjects.NUM_CLASSES, step=1, dtype=torch.long)
+            self.labels = labels.expand((self.size // MNISTObjects.NUM_CLASSES, -1)).reshape(-1)
 
             if self.template_mixing == 'pdf':
-                rec = pcae_decoder(poses, presences)
-                images = rec.pdf.mean()
+                rec = pcae_decoder(self.poses[..., :2, :].reshape(*self.poses.shape[:-2], 6), self.presences)
+                self.images = rec.pdf.mean()
             elif self.template_mixing == 'max':
-                transformed_templates = self.transform_templates(self.templates, poses)
+                transformed_templates = self.transform_templates(self.templates, self.poses)
                 # templates = templates.repeat((self.size // MNISTObjects.NUM_CLASSES, 1))
-                images = (transformed_templates.T * presences.T).T.max(dim=1)[0]
+                self.images = (transformed_templates.T * presences.T).T.max(dim=1)[0]
             else:
                 raise ValueError(f'Invalid template_mixing value {self.template_mixing}')
-
-            self.data = EasyDict(
-                images=images,
-                templates=pcae_decoder.templates,
-                jitter_poses=jitter_poses,
-                caps_poses=part_poses,
-                sample_poses=object_poses
-            )
 
     def overlap_metric(self, transformed_templates, presences):
         # Tensor of size (N_CLASSES, N_CAPS, C, H, W), transposes are for elem-wise mult broadcasting
@@ -162,25 +158,17 @@ class MNISTObjects(torch.utils.data.Dataset):
         poses = torch.stack([trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears], dim=-1)
         return poses
 
-    def plot(self, n=10):
-        images = torch.stack([self[i][0] for i in range(n)])
-        plot_image_tensor(images)
-
     def __getitem__(self, item):
         """
         Randomly inserts the MNIST images into cifar images
         :param item:
         :return:
         """
-        if self.train:
-            idx = item
-        else:
-            idx = self.size * 4 // 5 + item
-        image = self.data.images[idx]
+        idx = item if self.train else self.size * 4 // 5 + item
 
+        image = self.images[idx]
         image = self.norm_img(image)
-
-        return image, torch.zeros(1, dtype=torch.long)
+        return image, self.labels[idx]
 
     @staticmethod
     def norm_img(image):
@@ -191,12 +179,19 @@ class MNISTObjects(torch.utils.data.Dataset):
         return image
 
     def transform_templates(self, templates, poses, output_shape=(40, 40)):
+        """
+
+        :param templates:
+        :param poses: [MNISTObjects.NUM_CLASSES * self._n_caps, 3, 3] tensor
+        :param output_shape:
+        :return:
+        """
         batch_size = poses.shape[0]
         template_batch_shape = (batch_size, self.num_caps, templates.shape[-3], *output_shape)
         flattened_template_batch_shape = (template_batch_shape[0]*template_batch_shape[1], *template_batch_shape[2:])
 
-        # poses shape (MNISTObjects.NUM_CLASSES * self._n_caps, 2, 3)
-        poses = poses.view(-1, 2, 3)
+        # poses shape
+        poses = poses[..., :2, :].reshape(-1, 2, 3)
         # TODO: port to using https://kornia.readthedocs.io/en/latest/geometry.transform.html#kornia.geometry.transform.warp_affine
         grid_coords = nn.functional.affine_grid(theta=poses, size=flattened_template_batch_shape)
         template_stack = templates.repeat(batch_size, 1, 1, 1)
@@ -208,9 +203,33 @@ class MNISTObjects(torch.utils.data.Dataset):
             return self.size * 4 // 5
         return self.size // 5
 
+    # Vis util functions
+    def plot(self, n=NUM_CLASSES):
+        objects = self.objects.max(dim=1)[0]
+        plot_image_tensor(objects)
+        images = torch.stack([self[i][0] for i in range(n)])
+        plot_image_tensor(images)
+
+    def log_to_wandb_run(self, run, name="mnist_objects", **artifact_kwargs):
+        artifact = wandb.Artifact(name, "dataset", **artifact_kwargs)
+
+        def get_row(idx):
+            data = self[idx]
+            return [idx, to_wandb_im(data[0]), data[1].item()]
+
+        table = wandb.Table(
+            columns=["idx", "image", "label"],
+            data=[get_row(idx) for idx in range(len(self))]
+        )
+        run.log({name: table})
+
+        artifact.add(table, "dataset_table")
+        run.log_artifact(artifact)
+        pass
+
 if __name__ == '__main__':
     # 8 Temp: mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd
     # 4 Temp: mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq
     # MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd', num_caps=8)
-    ds = MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)
-    ds.plot()
+    ds = MNISTObjects(template_mixing='max', template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)
+    ds.plot(100)
