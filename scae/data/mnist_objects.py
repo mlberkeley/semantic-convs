@@ -20,6 +20,7 @@ import scae.util.math as math_utils
 from scae.util.vis import plot_image_tensor_2D, plot_image_tensor
 from scae.util.wandb import to_wandb_im
 
+
 class MNISTObjects(torch.utils.data.Dataset):
     NUM_CLASSES = 10
 
@@ -221,7 +222,6 @@ class MNISTObjects(torch.utils.data.Dataset):
             columns=["idx", "image", "label"],
             data=[get_row(idx) for idx in range(len(self))]
         )
-        run.log({name: table})
 
         artifact.add(table, "dataset_table")
         run.log_artifact(artifact)

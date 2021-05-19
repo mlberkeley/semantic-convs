@@ -6,6 +6,7 @@ from easydict import EasyDict
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+from torch.nn.modules.utils import _pair
 
 import scae.util.math as math_utils
 
@@ -39,6 +40,43 @@ class ConvAttn(nn.Module):
         return (f * a_mask).sum(-1, keepdim=False)
 
 
+class GroupEqConv2d(nn.Module):
+    # Implementation of Group Equivariant Convolutional Networks: https://arxiv.org/abs/1602.07576v3
+    GROUPS = {
+        "p4": (
+            # Rot 0 CW = identity op
+            lambda im: im,
+            # Rot 90 CW = flip over x-axis, then transpose image
+            lambda im: im.flip(-2).permute(0, 1, 3, 2),
+            # Rot 90 CCW = transpose image, then flip over x-axis
+            lambda im: im.permute(0, 1, 3, 2).flip(-2),
+            # Rot 180 CW = flip over x-axis and y-axis
+            lambda im: im.flip(-1).flip(-2)
+        )
+    }
+
+    def __init__(self, in_channels, out_channels, kernel_size, group=GROUPS["p4"], **kwargs):
+        super(GroupEqConv2d, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.group_size = len(group)
+        self.group = group
+
+        assert out_channels % self.group_size == 0, "Num output channels must be a multiple of group size"
+        self.conv = nn.Conv2d(in_channels, out_channels // self.group_size, kernel_size, **kwargs)
+        # self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, **kwargs)
+
+    def forward(self, x):
+        batch_size = x.shape[0]
+        x_transforms = torch.cat([f(x) for f in self.group])
+        z = self.conv(x_transforms)
+        # z.reshape(batch_size, self.group_size, self.out_channels // self.group_size, *z.shape[-2:])
+        return z.reshape(batch_size, -1, *z.shape[-2:])
+        # return z.reshape(batch_size, self.group_size, self.out_channels, *z.shape[-2:]).mean(dim=1)
+
+
+
 class CapsuleImageEncoder(nn.Module):
     def __init__(self, args):
         super(CapsuleImageEncoder, self).__init__()
@@ -49,11 +87,13 @@ class CapsuleImageEncoder(nn.Module):
         self._inverse_space_transform = args.pcae.encoder.inverse_space_transform
 
         # Image embedding encoder
-        channels = [args.im_channels, 128, 128, 128, 128]
+        # channels = [args.im_channels, 128, 128, 128, 128]
+        channels = [args.im_channels, 32, 32, 32, 128]
         strides = [2, 2, 1, 1]
         layers = []
         for i in range(4):
-            layers.append(nn.Conv2d(channels[i], channels[i+1], kernel_size=3, stride=strides[i]))
+            # layers.append(nn.Conv2d(channels[i], channels[i+1], kernel_size=3, stride=strides[i]))
+            layers.append(GroupEqConv2d(channels[i], channels[i + 1], kernel_size=3, stride=strides[i]))
             layers.append(nn.ReLU())
             layers.append(nn.BatchNorm2d(channels[i+1]))
         self._encoder = nn.Sequential(*layers)
