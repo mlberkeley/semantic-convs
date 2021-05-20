@@ -64,7 +64,7 @@ class GroupEqConv2d(nn.Module):
         self.group = group
 
         assert out_channels % self.group_size == 0, "Num output channels must be a multiple of group size"
-        self.conv = nn.Conv2d(in_channels, out_channels // self.group_size, kernel_size, **kwargs)
+        # self.conv = nn.Conv2d(in_channels, out_channels // self.group_size, kernel_size, **kwargs)
         # self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, **kwargs)
 
     def forward(self, x):
@@ -87,13 +87,17 @@ class CapsuleImageEncoder(nn.Module):
         self._inverse_space_transform = args.pcae.encoder.inverse_space_transform
 
         # Image embedding encoder
-        # channels = [args.im_channels, 128, 128, 128, 128]
-        channels = [args.im_channels, 32, 32, 32, 128]
+        channels = [args.im_channels, 128, 128, 128, 128]
         strides = [2, 2, 1, 1]
         layers = []
-        for i in range(4):
-            # layers.append(nn.Conv2d(channels[i], channels[i+1], kernel_size=3, stride=strides[i]))
-            layers.append(GroupEqConv2d(channels[i], channels[i + 1], kernel_size=3, stride=strides[i]))
+
+        layers.append(GroupEqConv2d(channels[0], channels[1], kernel_size=3, stride=strides[0]))
+        layers.append(nn.ReLU())
+        layers.append(nn.BatchNorm2d(channels[1]))
+
+        for i in range(1, 4):
+            layers.append(nn.Conv2d(channels[i], channels[i+1], kernel_size=3, stride=strides[i]))
+            # layers.append(GroupEqConv2d(channels[i], channels[i + 1], kernel_size=3, stride=strides[i]))
             layers.append(nn.ReLU())
             layers.append(nn.BatchNorm2d(channels[i+1]))
         self._encoder = nn.Sequential(*layers)
