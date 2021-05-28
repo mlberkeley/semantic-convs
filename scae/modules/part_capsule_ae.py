@@ -76,7 +76,6 @@ class GroupEqConv2d(nn.Module):
         # return z.reshape(batch_size, self.group_size, self.out_channels, *z.shape[-2:]).mean(dim=1)
 
 
-
 class CapsuleImageEncoder(nn.Module):
     def __init__(self, args):
         super(CapsuleImageEncoder, self).__init__()
@@ -91,11 +90,11 @@ class CapsuleImageEncoder(nn.Module):
         strides = [2, 2, 1, 1]
         layers = []
 
-        layers.append(GroupEqConv2d(channels[0], channels[1], kernel_size=3, stride=strides[0]))
-        layers.append(nn.ReLU())
-        layers.append(nn.BatchNorm2d(channels[1]))
+        # layers.append(GroupEqConv2d(channels[0], channels[1], kernel_size=3, stride=strides[0]))
+        # layers.append(nn.ReLU())
+        # layers.append(nn.BatchNorm2d(channels[1]))
 
-        for i in range(1, 4):
+        for i in range(0, 4):
             layers.append(nn.Conv2d(channels[i], channels[i+1], kernel_size=3, stride=strides[i]))
             # layers.append(GroupEqConv2d(channels[i], channels[i + 1], kernel_size=3, stride=strides[i]))
             layers.append(nn.ReLU())
@@ -117,10 +116,11 @@ class CapsuleImageEncoder(nn.Module):
         img_embedding = self._encoder(x)  # img_embedding shape (batch_size, C, H, W)
         preds = self._attn(img_embedding)  # preds shape (batch_size, self._n_caps, self._n_dims)
 
-        poses, features, presence_logits = preds.split(self._splits, dim=-1)
+        raw_poses, features, presence_logits = preds.split(self._splits, dim=-1)
 
         # Tensor of shape (batch_size, self._n_caps, 6)
-        poses = math_utils.geometric_transform(poses, True, inverse=self._inverse_space_transform)
+        poses = math_utils.pose_activations(raw_poses)
+        pose_mats = math_utils.geometric_transform(poses, similarity=True, inverse=self._inverse_space_transform)
 
         if self._feat_dim == 0:
             features = None
@@ -132,7 +132,8 @@ class CapsuleImageEncoder(nn.Module):
         presences = torch.sigmoid(presence_logits)
 
         return EasyDict(
-            poses=poses,
+            poses=poses, # trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears
+            pose_mats=pose_mats,
             features=features,
             presences=presences,
             presence_logits=presence_logits,
@@ -191,20 +192,20 @@ class TemplateImageDecoder(nn.Module):
 
         self.templates = torch.nn.Parameter(ts, requires_grad=True)
 
-    def forward(self, poses, presences=None):
+    def forward(self, pose_mats, presences=None):
         """
 
-        :param capsules:
-        :param bg_image: size (N, C, H, W)
+        :param poses:
+        :param presences:
         :return:
         """
-        batch_size = poses.shape[0]
+        batch_size = pose_mats.shape[0]
         n_dims = self._n_channels + 1 if self._use_alpha_channel else self._n_channels
 
         template_batch_shape = [batch_size, self._n_caps, n_dims] + list(self._output_size)
 
         # poses shape (batch_size * self._n_caps, 2, 3)
-        poses = poses.view(-1, 2, 3)
+        poses = pose_mats.view(-1, 2, 3)
         # TODO: port to using https://kornia.readthedocs.io/en/latest/geometry.transform.html#kornia.geometry.transform.warp_affine
         grid_coords = nn.functional.affine_grid(theta=poses, size=(poses.shape[0], n_dims, *self._output_size))
 

@@ -167,6 +167,7 @@ def main():
     trainer = pl.Trainer(gpus=1, max_epochs=args.num_epochs, logger=logger,
                          callbacks=[lr_logger, best_checkpointer, last_checkpointer])
     trainer.fit(model, train_dataloader, val_dataloader)
+    model.upload_tables()
 
 if __name__ == "__main__":
     main()

@@ -36,18 +36,8 @@ def add_noise(tensor, noise_type, scale):
     return tensor + noise
 
 
-def geometric_transform(pose_tensors, similarity=False, nonlinear=True,
-                        as_matrix=False, inverse=True):
-    """
-    Converts parameter tensor into an affine or similarity transform.
-    :param pose_tensor: [..., 6] tensor.
-    :param similarity: bool.
-    :param nonlinear: bool; applies nonlinearities to pose params if True.
-    :param as_matrix: bool; convers the transform to a matrix if True.
-    :return: [..., 3, 3] tensor if `as_matrix` else [..., 6] tensor.
-    """
-    trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears = pose_tensors.split(1, dim=-1)
-
+def pose_activations(pose, nonlinear=True):
+    trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears = pose.split(1, dim=-1)
     if nonlinear:
         k = 0.5
         # TODO: use analytically computed trans rescaling or move it out of this method
@@ -60,6 +50,25 @@ def geometric_transform(pose_tensors, similarity=False, nonlinear=True,
     else:
         scale_xs = torch.abs(scale_xs) + 1e-2
         scale_ys = torch.abs(scale_ys) + 1e-2
+
+    return torch.stack(trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears)
+
+
+# TODO: make sure activation functions get applied properly to capsule.py usages
+def geometric_transform(pose_tensors, similarity=False, nonlinear=True,
+                        as_matrix=False, inverse=True):
+    """
+    Converts parameter tensor into an affine or similarity transform.
+    :param pose_tensor: [..., 6] tensor.
+    :param similarity: bool.
+    :param nonlinear: bool; applies nonlinearities to pose params if True.
+    :param as_matrix: bool; convers the transform to a matrix if True.
+    :return: [..., 3, 3] tensor if `as_matrix` else [..., 6] tensor.
+    """
+    trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears = pose_tensors.split(1, dim=-1)
+
+    scale_xs = scale_xs + 1e-2
+    scale_ys = scale_ys + 1e-2
 
     cos_thetas, sin_thetas = torch.cos(thetas), torch.sin(thetas)
 

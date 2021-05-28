@@ -231,5 +231,5 @@ if __name__ == '__main__':
     # 8 Temp: mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd
     # 4 Temp: mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq
     # MNISTObjects(template_src='mlatberkeley/StackedCapsuleAutoEncoders/fm9q1zxd', num_caps=8)
-    ds = MNISTObjects(template_mixing='max', template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)
+    ds = MNISTObjects(template_mixing='max', size=100, template_src='mlatberkeley/StackedCapsuleAutoEncoders/67lzaiyq', num_caps=4, new=True)
     ds.plot(100)
