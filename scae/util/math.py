@@ -51,7 +51,7 @@ def pose_activations(pose, nonlinear=True):
         scale_xs = torch.abs(scale_xs) + 1e-2
         scale_ys = torch.abs(scale_ys) + 1e-2
 
-    return torch.stack(trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears)
+    return torch.cat([trans_xs, trans_ys, scale_xs, scale_ys, thetas, shears], dim=-1)
 
 
 # TODO: make sure activation functions get applied properly to capsule.py usages

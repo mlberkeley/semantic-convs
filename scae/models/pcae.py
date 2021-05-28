@@ -82,10 +82,10 @@ class PCAE(pl.LightningModule):
             # self.logger.experiment.log({'capsule_presence_thres': (capsules.presences > .1).sum(dim=-1)}, commit=False)
             if log_imgs:
                 n = 8
-                gt_imgs = [to_wandb_im(imgs[i], caption='gt_image') for i in range(n)]
-                rec_imgs = [rec_to_wandb_im(rec_imgs[i], caption='rec_image') for i in range(n)]
-                gt_rec_imgs = [None] * (2 * n)
-                gt_rec_imgs[::2], gt_rec_imgs[1::2] = gt_imgs, rec_imgs  # interweave
+                gt_wandb_imgs = [to_wandb_im(imgs[i], caption='gt_image') for i in range(n)]
+                rec_wandb_imgs = [rec_to_wandb_im(rec_imgs[i], caption='rec_image') for i in range(n)]
+                gt_rec_wandb_imgs = [None] * (2 * n)
+                gt_rec_wandb_imgs[::2], gt_rec_wandb_imgs[1::2] = gt_wandb_imgs, rec_wandb_imgs  # interweave
 
                 template_imgs = [to_wandb_im(t, caption=f'tmp_{i}') for i, t in enumerate(rec.raw_templates)]
                 mixture_mean_imgs = [to_wandb_im(t, caption=f'tmp_{i}') for i, t in enumerate(rec.mixture_means[0])]
@@ -93,11 +93,12 @@ class PCAE(pl.LightningModule):
 
                 # TODO: proper train / val prefixing
                 self.logger.experiment.log({
-                    'imgs': gt_rec_imgs,
+                    'imgs': gt_rec_wandb_imgs,
                     'templates': template_imgs,
                     'mixture_means': mixture_mean_imgs,
                     'mixture_logits': mixture_logit_imgs
                 }, commit=False)
+
                 for idx in range(batch_size):
                     if idx < 20:
                         self.add_row_to_tables("img_table", log, batch_idx, idx, labels, rec_ll, rec_mse, capsules,
@@ -186,9 +187,9 @@ class PCAE(pl.LightningModule):
 
     # TODO: add ssim, psnr (kornia)
     def add_row_to_tables(self, table, mode, batch_idx, idx, labels, rec_ll, mse, capsules,
-                          rec=None, imgs=None, rec_img=None):
+                          rec=None, imgs=None, rec_imgs=None):
         # scalars_only = None not in (rec, imgs, rec_img) TODO: rec is null but still has attributes somehow?
-        scalars_only = None in (rec, imgs, rec_img)
+        scalars_only = None in (rec, imgs, rec_imgs)
         if not hasattr(self, table):
             self.init_tables()
 
@@ -209,7 +210,7 @@ class PCAE(pl.LightningModule):
         if not scalars_only:
             row += [
                 # "gt_img", "rec_img"
-                to_wandb_im(imgs[idx]), to_wandb_im(rec_img[idx]),
+                to_wandb_im(imgs[idx]), to_wandb_im(rec_imgs[idx]),
                 # templates X "transformed_img"
                 *template_images,
             ]

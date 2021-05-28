@@ -38,12 +38,13 @@ def main():
 
     dataloader_args = EasyDict(batch_size=args.batch_size, shuffle=False,
                                num_workers=0 if args.debug else args.data_workers)
-    if 'mnist' in args.dataset:
+    if 'mnist' in args.dataset.name:
         args.num_classes = 10
         args.im_channels = 1
-        args.image_size = (40, 40)
+        args.object_size = (28, 28)
 
-        if 'objects' in args.dataset:
+        if 'objects' in args.dataset.name:
+            # TODO: implement dataset.random_X flag usage for MNISTObjects
             from data.mnist_objects import MNISTObjects
 
             dataset = MNISTObjects(data_path, train=True)
@@ -52,9 +53,14 @@ def main():
                                         **dataloader_args)
         else:
             from torchvision.datasets import MNIST
+            translate_range = tuple((1 - np.asarray(args.object_size) / np.asarray(args.pcae.decoder.output_size)) / 2)
 
             t = transforms.Compose([
-                transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
+                transforms.Resize(size=args.pcae.decoder.output_size),
+                transforms.RandomAffine(
+                    degrees=180 if args.dataset.random_rotate else 0,
+                    translate=translate_range if args.dataset.random_translate else None
+                ),
                 transforms.ToTensor(),
                 # norm_1c
             ])
@@ -62,57 +68,60 @@ def main():
                                           **dataloader_args)
             val_dataloader = DataLoader(MNIST(data_path/'mnist', train=False, transform=t, download=True),
                                         **dataloader_args)
-    elif 'usps' in args.dataset:
-        args.num_classes = 10
-        args.im_channels = 1
-        args.image_size = (40, 40)
-
-        from torchvision.datasets import USPS
-
-        t = transforms.Compose([
-            transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
-            transforms.ToTensor(),
-            # norm_1c
-        ])
-        train_dataloader = DataLoader(USPS(data_path/'usps', train=True, transform=t, download=True),
-                                      **dataloader_args)
-        val_dataloader = DataLoader(USPS(data_path/'usps', train=False, transform=t, download=True),
-                                    **dataloader_args)
-    elif 'cifar10' in args.dataset:
-        args.num_classes = 10
-        args.im_channels = 3
-        args.image_size = (32, 32)
-
-        from torchvision.datasets import CIFAR10
-
-        t = transforms.Compose([
-            transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
-            transforms.ToTensor()
-        ])
-        train_dataloader = DataLoader(CIFAR10(data_path/'cifar10', train=True, transform=t, download=True),
-                                      **dataloader_args)
-        val_dataloader = DataLoader(CIFAR10(data_path/'cifar10', train=False, transform=t, download=True),
-                                    **dataloader_args)
-    elif 'svhn' in args.dataset:
-        args.num_classes = 10
-        args.im_channels = 1
-        args.image_size = (32, 32)
-
-        from torchvision.datasets import SVHN
-
-        t = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Lambda(sobel_filter),
-            transforms.ToPILImage(),
-            transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
-            transforms.ToTensor(),
-        ])
-        train_dataloader = DataLoader(SVHN(data_path/'svhn', split='train', transform=t, download=True),
-                                      **dataloader_args)
-        val_dataloader = DataLoader(SVHN(data_path/'svhn', split='test', transform=t, download=True),
-                                    **dataloader_args)
     else:
-        raise NotImplementedError()
+        if hasattr(args.dataset, "random_translate") or hasattr(args.dataset, "random_rotate"):
+            raise NotImplementedError(f"Random augmentations not implemented for {args.dataset.name}")
+        if 'usps' in args.dataset.name:
+            args.num_classes = 10
+            args.im_channels = 1
+            args.image_size = (40, 40)
+
+            from torchvision.datasets import USPS
+
+            t = transforms.Compose([
+                transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
+                transforms.ToTensor(),
+                # norm_1c
+            ])
+            train_dataloader = DataLoader(USPS(data_path/'usps', train=True, transform=t, download=True),
+                                          **dataloader_args)
+            val_dataloader = DataLoader(USPS(data_path/'usps', train=False, transform=t, download=True),
+                                        **dataloader_args)
+        elif 'cifar10' in args.dataset.name:
+            args.num_classes = 10
+            args.im_channels = 3
+            args.image_size = (32, 32)
+
+            from torchvision.datasets import CIFAR10
+
+            t = transforms.Compose([
+                transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
+                transforms.ToTensor()
+            ])
+            train_dataloader = DataLoader(CIFAR10(data_path/'cifar10', train=True, transform=t, download=True),
+                                          **dataloader_args)
+            val_dataloader = DataLoader(CIFAR10(data_path/'cifar10', train=False, transform=t, download=True),
+                                        **dataloader_args)
+        elif 'svhn' in args.dataset.name:
+            args.num_classes = 10
+            args.im_channels = 1
+            args.image_size = (32, 32)
+
+            from torchvision.datasets import SVHN
+
+            t = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(sobel_filter),
+                transforms.ToPILImage(),
+                transforms.RandomCrop(size=args.pcae.decoder.output_size, pad_if_needed=True),
+                transforms.ToTensor(),
+            ])
+            train_dataloader = DataLoader(SVHN(data_path/'svhn', split='train', transform=t, download=True),
+                                          **dataloader_args)
+            val_dataloader = DataLoader(SVHN(data_path/'svhn', split='test', transform=t, download=True),
+                                        **dataloader_args)
+        else:
+            raise NotImplementedError(f"No dataset '{args.dataset.name}' implemented")
 
     if '{' in args.log.run_name:
         args.log.run_name = args.log.run_name.format(**args)
@@ -153,10 +162,10 @@ def main():
 
         #  TODO: after ccae
     else:
-        raise NotImplementedError()
+        raise NotImplementedError(f"No model '{args.model}' implemented")
 
-    # dataset.log_to_wandb_run(wandb.run)
-    if 'mnist' in args.dataset and 'objects' in args.dataset:
+    # dataset.log_as_artifact()
+    if 'mnist' in args.dataset.name and 'objects' in args.dataset.name:
         wandb.log({"dataset_templates": [wandb.Image(i.detach().cpu().numpy(), caption="Label") for i in dataset.data.templates]})
         wandb.log({"dataset_images": [wandb.Image(i.detach().cpu().numpy(), caption="Label") for i in dataset.data.images[:50]]})
 
