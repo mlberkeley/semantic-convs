@@ -231,13 +231,58 @@ class PCAE(pl.LightningModule):
         df = pd.DataFrame(data=self.result_table.data, columns=self.result_table.columns)
 
         width = 20
-        len_y, len_x = self.n_classes + 1, self.args.pcae.num_caps
-        fig, ax = plt.subplots(len_y, len_x, figsize=(width, width / len_x * len_y), sharex=True)
-        for a, attr in enumerate(["presence", "trans_x", "trans_y", "theta", "scale_x", "scale_y", "shear"]):
+        # TODO: update this code with whats in notebook
+
+        # TODO: non-crazy 2d histogram grid weighting of attributes by presence
+
+        # TODO; resolve
+        #  Traceback (most recent call last):
+        #   File "/home/axquaris/StackedCapsuleAutoencoders/scae/main.py", line 182, in <module>
+        #     main()
+        #   File "/home/axquaris/StackedCapsuleAutoencoders/scae/main.py", line 179, in main
+        #     model.upload_tables()
+        #   File "/home/axquaris/StackedCapsuleAutoencoders/scae/models/pcae.py", line 267, in upload_tables
+        #     artifact.add(self.result_table, "results")
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/wandb_artifacts.py", line 490, in add
+        #     val = obj.to_json(self)
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/data_types.py", line 544, in to_json
+        #     mapped_row.append(_json_helper(v, artifact))
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/data_types.py", line 135, in _json_helper
+        #     return val.to_json(artifact)
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/data_types.py", line 1760, in to_json
+        #     json_dict = super(Image, self).to_json(run_or_artifact)
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/data_types.py", line 548, in to_json
+        #     self._path, name=name, is_tmp=self._is_tmp
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/wandb_artifacts.py", line 379, in add_file
+        #     return self._add_local_file(name, local_path, digest=digest)
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/wandb_artifacts.py", line 697, in _add_local_file
+        #     self._manifest.add_entry(entry)
+        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/interface/artifacts.py", line 95, in add_entry
+        #     raise ValueError("Cannot add the same path twice: %s" % entry.path)
+        #   ValueError: Cannot add the same path twice: media/images/c0451f6d.png
+        #   scale_y and shear unused due to similarity constraint
+        #   attrs = ["presence", "trans_x", "trans_y", "theta", "scale_x", "scale_y", "shear"]
+
+        # TODO: ensure figure logging works, run mnist augmentations experiments
+
+        attrs = ["presence", "trans_x", "trans_y", "theta", "scale_x"]
+        len_y, len_x = self.n_classes + 1, len(attrs)
+        fig, ax = plt.subplots(len_y, len_x, figsize=(width, width / len_x * len_y), sharex='col')
+        for a, attr in enumerate(attrs):
             for c in range(self.args.pcae.num_caps):
-                sns.distplot(df[f"c{c}_{attr}"], ax=ax[0, a])
+                col_str = f"c{c}_{attr}"
+                sns.kdeplot(df[col_str], ax=ax[0, a])
+                ax[0, a].set_title(f"allobjs_{attr}")
+
                 for l in range(self.n_classes):
-                    sns.kdeplot(df[df["label"] == l][f"c{c}_{attr}"], ax=ax[l + 1, a])
+                    sns.kdeplot(df[df["label"] == l][col_str], ax=ax[l + 1, a])
+                    ax[l + 1, a].set_title(f"obj{l}_{attr}")
+
+            for l in range(self.n_classes + 1):
+                ax[l, a].set_xlabel("")
+                ax[l, a].set_ylabel("")
+                ax[l, a].xaxis.set_tick_params(which='both', labelbottom=True)
+
         plt.show()
         wandb.log({"result_pose_hists": wandb.Image(plt)})
 
@@ -251,6 +296,7 @@ class PCAE(pl.LightningModule):
         artifact = wandb.Artifact(f"{timestamp}_run{run.id}", type="run")
         artifact.add(self.img_table, "img_predictions")
         artifact.add(self.scalar_table, "scalar_predictions")
+        artifact.add(self.result_table, "results")
 
         t = time.time()
         run.log({"img_predictions": self.img_table})
@@ -259,6 +305,10 @@ class PCAE(pl.LightningModule):
         t = time.time()
         run.log({"scalar_predictions": self.scalar_table})
         print(f"took {time.time() - t}s to log SCALAR TABLE to run")
+
+        t = time.time()
+        run.log({"results": self.result_table})
+        print(f"took {time.time() - t}s to log RESULTS TABLE to run")
 
         t = time.time()
         run.log_artifact(artifact)
