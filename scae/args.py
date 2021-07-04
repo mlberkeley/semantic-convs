@@ -137,9 +137,11 @@ def parse_args(args=None):
         # todo(maximsmol): change default
         help='part of the model to run')
     parser.add_argument(
-        '--dataset',
+        '--dataset.name',
         type=str.lower, default='mnist',
         choices=['mnist', 'usps', 'cifar10', 'svhn'])
+    parser.add_argument('--dataset.random_rotate', type=bool)
+    parser.add_argument('--dataset.random_translate', type=bool)
     parser.add_argument(
         '--data_workers',
         type=int, default=len(os.sched_getaffinity(0)),

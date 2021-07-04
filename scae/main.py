@@ -146,7 +146,7 @@ def main():
             raise NotImplementedError(f"No dataset '{args.dataset.name}' implemented")
 
     if '{' in args.log.run_name:
-        args.log.run_name = args.log.run_name.format(**args)
+        args.log.run_name = eval(f'f\'{args.log.run_name}\'') # args.log.run_name.format(**args)
     logger = WandbLogger(
         project=args.log.project,
         name=args.log.run_name,

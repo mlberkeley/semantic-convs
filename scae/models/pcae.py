@@ -266,7 +266,7 @@ class PCAE(pl.LightningModule):
 
     def upload_tables(self):
         # TODO: both tables
-        assert hasattr(self, "img_table") and hasattr(self, "scalar_table"), "tables not initialized"
+        # assert hasattr(self, "img_table") and hasattr(self, "scalar_table"), "tables not initialized"
         t = time.time()
         self.vis_tables()
         print(f"took {time.time() - t}s to generate and log PLOTS to run")
