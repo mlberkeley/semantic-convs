@@ -3,7 +3,10 @@ batch_size: 500
 num_epochs: 120
 
 model: pcae
-dataset: mnist_objects
+dataset:
+  name: mnist_objects
+  random_translate: True
+  random_rotate: False
 
 pcae:
   num_caps: 16

@@ -17,7 +17,7 @@ from scae.modules.part_capsule_ae import TemplateImageDecoder
 from scae.args import parse_args
 
 import scae.util.math as math_utils
-from scae.util.vis import plot_image_tensor_2D, plot_image_tensor
+from scae.util.plots import plot_image_tensor_2D, plot_image_tensor
 from scae.util.wandb import to_wandb_im
 
 

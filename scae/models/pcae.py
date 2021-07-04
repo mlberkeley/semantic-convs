@@ -5,6 +5,9 @@ import wandb
 from easydict import EasyDict
 import torch_optimizer as optim
 
+import pandas as pd
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,6 +16,7 @@ import pytorch_lightning as pl
 
 from scae.util.math import presence_l2_sparsity
 from scae.util.wandb import to_wandb_im, rec_to_wandb_im
+from scae.util.plots import pdf_grid_plot, pdf_grid_plot_expanded, fig_to_wandb_im
 
 
 class PCAE(pl.LightningModule):
@@ -27,7 +31,7 @@ class PCAE(pl.LightningModule):
         self.weight_decay = args.pcae.weight_decay
 
         self.n_classes = args.num_classes
-        self.mse = nn.MSELoss()
+        self.mse = nn.MSELoss(reduction='none')
 
         self.args = args
 
@@ -44,9 +48,11 @@ class PCAE(pl.LightningModule):
         rec_imgs = rec.pdf.mean()
 
         # Loss Calculations:
-        rec_ll = rec.pdf.log_prob(imgs).view(batch_size, -1).sum(dim=-1).mean()
+        rec_lls = rec.pdf.log_prob(imgs).view(batch_size, -1).sum(dim=-1)
+        rec_ll = rec_lls.mean()
         temp_l1 = F.relu(self.decoder.templates).mean()
-        rec_mse = self.mse(rec_imgs, imgs)
+        rec_mses = self.mse(rec_imgs, imgs).view(batch_size, -1).mean(dim=-1)
+        rec_mse = rec_mses.mean()
         pres_l2_sparsity_over_capsules, pres_l2_sparsity_over_batch =\
             presence_l2_sparsity(capsules.presences, num_classes=self.n_classes)
 
@@ -70,7 +76,7 @@ class PCAE(pl.LightningModule):
         # Logging:
         if log:
             for k in losses:
-                self.log(f'{log}_{k}', losses[k])
+                self.log(f'{k}/{log}', losses[k])
             # TODO: replace logging of this with grad-magnitude logging
             #   to understand contribution of each loss independently
             # for k in losses_scaled:
@@ -80,7 +86,7 @@ class PCAE(pl.LightningModule):
             # TODO: log caps presences
             # self.logger.experiment.log({'capsule_presence': capsules.presences.detach().cpu()}, commit=False)
             # self.logger.experiment.log({'capsule_presence_thres': (capsules.presences > .1).sum(dim=-1)}, commit=False)
-            if log_imgs:
+            if log_imgs and "val" not in log:
                 n = 8
                 gt_wandb_imgs = [to_wandb_im(imgs[i], caption='gt_image') for i in range(n)]
                 rec_wandb_imgs = [rec_to_wandb_im(rec_imgs[i], caption='rec_image') for i in range(n)]
@@ -93,21 +99,21 @@ class PCAE(pl.LightningModule):
 
                 # TODO: proper train / val prefixing
                 self.logger.experiment.log({
-                    'imgs': gt_rec_wandb_imgs,
-                    'templates': template_imgs,
-                    'mixture_means': mixture_mean_imgs,
-                    'mixture_logits': mixture_logit_imgs
+                    f'imgs/{log}': gt_rec_wandb_imgs,
+                    f'templates/{log}': template_imgs,
+                    f'mixture_means/{log}': mixture_mean_imgs,
+                    f'mixture_logits/{log}': mixture_logit_imgs
                 }, commit=False)
 
                 for idx in range(batch_size):
-                    if idx < 20:
-                        self.add_row_to_tables("img_table", log, batch_idx, idx, labels, rec_ll, rec_mse, capsules,
-                                               rec, imgs, rec_imgs)
-                    self.add_row_to_tables("scalar_table", log, batch_idx, idx, labels, rec_ll, rec_mse, capsules)
+                    # if idx < 20:
+                    #     self.add_row_to_tables("img_table", log, batch_idx, idx, labels, rec_ll, rec_mse, capsules,
+                    #                            rec, imgs, rec_imgs)
+                    self.add_row_to_tables("scalar_table", log, batch_idx, idx, labels, rec_lls, rec_mses, capsules)
 
         if self.current_epoch == self.args.num_epochs - 1 and "val" in log:
             for idx in range(batch_size):
-                self.add_row_to_tables("result_table", log, batch_idx, idx, labels, rec_ll, rec_mse, capsules,
+                self.add_row_to_tables(f"result_table", log, batch_idx, idx, labels, rec_lls, rec_mses, capsules,
                                        rec, imgs, rec_imgs)
 
         return EasyDict(
@@ -124,15 +130,14 @@ class PCAE(pl.LightningModule):
 
         if torch.isnan(ret.loss).any():  # TODO: try grad clipping?
             raise ValueError('loss is nan')
-
         return ret.loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=None):
-        # TODO: add val sets list
-        val_set = '' if dataloader_idx is None else f'_{self.val_sets[dataloader_idx]}'
+        val_set = '' if dataloader_idx is None else f'_{self.val_set_names[dataloader_idx]}'
         with torch.no_grad():
             img, labels = batch
             ret = self(img, labels, log=f'val{val_set}', log_imgs=(batch_idx == 0), batch_idx=batch_idx)
+
         return ret.loss
 
     def configure_optimizers(self):
@@ -175,9 +180,9 @@ class PCAE(pl.LightningModule):
         images = ["gt_img", "rec_img"]
         scalars = ["dataset", "mode", "epoch", "batch", "idx", "label", "rec_ll", "mse"]
 
-        self.img_table = wandb.Table(
-            columns=[*images, *template_images, *scalars, *template_scalars]
-        )
+        # self.img_table = wandb.Table(
+        #     columns=[*images, *template_images, *scalars, *template_scalars]
+        # )
         self.scalar_table = wandb.Table(
             columns=[*scalars, *template_scalars]
         )
@@ -186,7 +191,7 @@ class PCAE(pl.LightningModule):
         )
 
     # TODO: add ssim, psnr (kornia)
-    def add_row_to_tables(self, table, mode, batch_idx, idx, labels, rec_ll, mse, capsules,
+    def add_row_to_tables(self, table, mode, batch_idx, idx, labels, rec_lls, mses, capsules,
                           rec=None, imgs=None, rec_imgs=None):
         # scalars_only = None not in (rec, imgs, rec_img) TODO: rec is null but still has attributes somehow?
         scalars_only = None in (rec, imgs, rec_imgs)
@@ -216,91 +221,71 @@ class PCAE(pl.LightningModule):
             ]
         row += [
             # "dataset", "mode", "epoch", "batch", "idx", "label", "rec_ll", "mse"
-            self.args.dataset, mode, self.current_epoch, batch_idx, self.args.batch_size * batch_idx + idx,
-            label.item(), rec_ll.item(), mse.item(),
+            self.args.dataset.name, mode, self.current_epoch, batch_idx, self.args.batch_size * batch_idx + idx,
+            label.item(), rec_lls[idx].item(), mses[idx].item(),
             # templates X ["presence", pose]
             *template_scalars
         ]
         getattr(self, table).add_data(*row)
 
     def vis_tables(self):
-        import seaborn as sns
-        import pandas as pd
-        import matplotlib.pyplot as plt
-
         df = pd.DataFrame(data=self.result_table.data, columns=self.result_table.columns)
+        for c in range(self.args.pcae.num_caps):
+            # map thetas to [-pi, pi]
+            df[f"c{c}_theta"] = (df[f"c{c}_theta"] + np.pi) % (2 * np.pi) - np.pi
+        df = df[df["epoch"] == df["epoch"].max()]
 
-        width = 20
         # TODO: update this code with whats in notebook
 
         # TODO: non-crazy 2d histogram grid weighting of attributes by presence
 
-        # TODO; resolve
-        #  Traceback (most recent call last):
-        #   File "/home/axquaris/StackedCapsuleAutoencoders/scae/main.py", line 182, in <module>
-        #     main()
-        #   File "/home/axquaris/StackedCapsuleAutoencoders/scae/main.py", line 179, in main
-        #     model.upload_tables()
-        #   File "/home/axquaris/StackedCapsuleAutoencoders/scae/models/pcae.py", line 267, in upload_tables
-        #     artifact.add(self.result_table, "results")
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/wandb_artifacts.py", line 490, in add
-        #     val = obj.to_json(self)
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/data_types.py", line 544, in to_json
-        #     mapped_row.append(_json_helper(v, artifact))
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/data_types.py", line 135, in _json_helper
-        #     return val.to_json(artifact)
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/data_types.py", line 1760, in to_json
-        #     json_dict = super(Image, self).to_json(run_or_artifact)
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/data_types.py", line 548, in to_json
-        #     self._path, name=name, is_tmp=self._is_tmp
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/wandb_artifacts.py", line 379, in add_file
-        #     return self._add_local_file(name, local_path, digest=digest)
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/wandb_artifacts.py", line 697, in _add_local_file
-        #     self._manifest.add_entry(entry)
-        #   File "/home/axquaris/.conda/envs/crystalize/lib/python3.7/site-packages/wandb/sdk/interface/artifacts.py", line 95, in add_entry
-        #     raise ValueError("Cannot add the same path twice: %s" % entry.path)
+        # TODO; resolve (kinda already fixed)
         #   ValueError: Cannot add the same path twice: media/images/c0451f6d.png
-        #   scale_y and shear unused due to similarity constraint
-        #   attrs = ["presence", "trans_x", "trans_y", "theta", "scale_x", "scale_y", "shear"]
+        #   Caused by logging same image via table and
 
-        # TODO: ensure figure logging works, run mnist augmentations experiments
+        # TODO: run mnist augmentations experiments
 
-        attrs = ["presence", "trans_x", "trans_y", "theta", "scale_x"]
-        len_y, len_x = self.n_classes + 1, len(attrs)
-        fig, ax = plt.subplots(len_y, len_x, figsize=(width, width / len_x * len_y), sharex='col')
-        for a, attr in enumerate(attrs):
-            for c in range(self.args.pcae.num_caps):
-                col_str = f"c{c}_{attr}"
-                sns.kdeplot(df[col_str], ax=ax[0, a])
-                ax[0, a].set_title(f"allobjs_{attr}")
+        dfs_by_mode = {mode: df for mode, df in df.groupby('mode')}
 
-                for l in range(self.n_classes):
-                    sns.kdeplot(df[df["label"] == l][col_str], ax=ax[l + 1, a])
-                    ax[l + 1, a].set_title(f"obj{l}_{attr}")
+        for mode, df in dfs_by_mode.items():
+            fig, plt = pdf_grid_plot(
+                df, title=f"{mode} capsule activation distributions",
+                num_caps = self.args.pcae.num_caps, num_objs = self.n_classes
+            )
+            im1 = fig_to_wandb_im(fig)
 
-            for l in range(self.n_classes + 1):
-                ax[l, a].set_xlabel("")
-                ax[l, a].set_ylabel("")
-                ax[l, a].xaxis.set_tick_params(which='both', labelbottom=True)
+            fig, plt = pdf_grid_plot_expanded(
+                df, title=f"{mode} capsule activation distributions - extended plot",
+                num_caps=self.args.pcae.num_caps, num_objs=self.n_classes
+            )
+            im2 = fig_to_wandb_im(fig)
 
-        plt.show()
-        wandb.log({"result_pose_hists": wandb.Image(plt)})
+            wandb.log({f"result_pose_dists/{mode}": im1,
+                       f"result_pose_dists_expanded/{mode}": im2})
 
 
     def upload_tables(self):
         # TODO: both tables
         assert hasattr(self, "img_table") and hasattr(self, "scalar_table"), "tables not initialized"
+        t = time.time()
+        self.vis_tables()
+        print(f"took {time.time() - t}s to generate and log PLOTS to run")
+
         run = self.logger.experiment
 
-        timestamp = datetime.datetime.now().strftime("T%H-%M_D%m-%d")
+        timestamp = datetime.datetime.now().strftime("day%m-%d_time%H-%M")
         artifact = wandb.Artifact(f"{timestamp}_run{run.id}", type="run")
-        artifact.add(self.img_table, "img_predictions")
+        # artifact.add(self.img_table, "img_predictions")
         artifact.add(self.scalar_table, "scalar_predictions")
         artifact.add(self.result_table, "results")
 
         t = time.time()
-        run.log({"img_predictions": self.img_table})
-        print(f"took {time.time() - t}s to log IMAGE TABLE to run")
+        run.log_artifact(artifact)
+        print(f"took {time.time() - t}s to log ARTIFACT to run")
+
+        # t = time.time()
+        # run.log({"img_predictions": self.img_table})
+        # print(f"took {time.time() - t}s to log IMAGE TABLE to run")
 
         t = time.time()
         run.log({"scalar_predictions": self.scalar_table})
@@ -309,9 +294,3 @@ class PCAE(pl.LightningModule):
         t = time.time()
         run.log({"results": self.result_table})
         print(f"took {time.time() - t}s to log RESULTS TABLE to run")
-
-        t = time.time()
-        run.log_artifact(artifact)
-        print(f"took {time.time() - t}s to log ARTIFACT to run")
-
-        self.vis_tables()
